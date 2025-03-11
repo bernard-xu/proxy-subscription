@@ -1,0 +1,77 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Add this permission to allow creating releases
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Build Frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+          cd ..
+          mkdir -p backend/dist
+          cp -r frontend/dist/* backend/dist/
+      
+      - name: Build for Windows
+        run: |
+          mkdir -p dist/windows
+          cd backend
+          go mod tidy
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ../dist/windows/proxy-subscription.exe .
+          cd ..
+          mkdir -p dist/windows/data
+          cp README.md dist/windows/
+          cd dist
+          zip -r proxy-subscription-windows-amd64.zip windows/
+      
+      - name: Build for Linux
+        run: |
+          mkdir -p dist/linux
+          cd backend
+          go mod tidy
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ../dist/linux/proxy-subscription .
+          cd ..
+          mkdir -p dist/linux/data
+          cp README.md dist/linux/
+          cd dist
+          tar -czvf proxy-subscription-linux-amd64.tar.gz linux/
+      
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          files: |
+            dist/proxy-subscription-windows-amd64.zip
+            dist/proxy-subscription-linux-amd64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
