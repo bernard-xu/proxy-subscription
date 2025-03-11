@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (例如: v1.0.0)'
+        required: true
+        default: 'v0.0.0'
 
 jobs:
   build:
@@ -26,9 +32,14 @@ jobs:
         with:
           node-version: '18'
       
-      - name: Get version from tag
+      - name: Get version from tag or input
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          fi
       
       - name: Build Frontend
         run: |
@@ -62,7 +73,13 @@ jobs:
           cp README.md dist/linux/
           cd dist
           tar -czvf proxy-subscription-linux-amd64.tar.gz linux/
-      
+      - name: Create a new tag
+        id: tag
+        run: |
+          TAG=${{ steps.get_version.outputs.VERSION }}  # Remove the space after '='
+          git tag $TAG
+          git push origin $TAG
+
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
@@ -70,6 +87,7 @@ jobs:
           name: Release ${{ steps.get_version.outputs.VERSION }}
           draft: false
           prerelease: false
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
           files: |
             dist/proxy-subscription-windows-amd64.zip
             dist/proxy-subscription-linux-amd64.tar.gz
