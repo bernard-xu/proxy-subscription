@@ -64,4 +64,14 @@ export const getMergedSubscriptionUrl = (format: string = 'base64') => {
   return `${API_URL}/merged?format=${format}`;
 };
 
+// 设置相关API
+export const settingsApi = {
+  getSettings: () => api.get('/settings'),
+  saveSettings: (settings: {
+    autoRefresh: boolean;
+    refreshInterval: number;
+    defaultFormat: string;
+  }) => api.post('/settings', settings),
+};
+
 export default api;

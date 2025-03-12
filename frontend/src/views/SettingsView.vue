@@ -85,7 +85,7 @@ import { ref, reactive, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useSubscriptionStore } from '@/stores/subscription';
 import { useProxyStore } from '@/stores/proxy';
-import api from '@/api';
+import api, { settingsApi } from '@/api';
 
 const subscriptionStore = useSubscriptionStore();
 const proxyStore = useProxyStore();
@@ -110,16 +110,20 @@ const saveSettings = async () => {
   saving.value = true;
   
   try {
-    // 这里应该调用API保存设置
-    // 由于我们还没有实现设置API，这里只是模拟
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // 调用API保存设置
+    await settingsApi.saveSettings({
+      autoRefresh: settings.autoRefresh,
+      refreshInterval: settings.refreshInterval,
+      defaultFormat: settings.defaultFormat
+    });
     
-    // 保存到本地存储
+    // 同时保存到本地存储作为缓存
     localStorage.setItem('settings', JSON.stringify(settings));
     
     ElMessage.success('设置保存成功');
   } catch (error) {
     ElMessage.error('设置保存失败');
+    console.error('保存设置失败:', error);
   } finally {
     saving.value = false;
   }
@@ -143,23 +147,34 @@ const checkBackendStatus = async () => {
 };
 
 // 加载设置
-const loadSettings = () => {
-  const savedSettings = localStorage.getItem('settings');
-  if (savedSettings) {
-    try {
-      const parsed = JSON.parse(savedSettings);
-      settings.autoRefresh = parsed.autoRefresh ?? false;
-      settings.refreshInterval = parsed.refreshInterval ?? 6;
-      settings.defaultFormat = parsed.defaultFormat ?? 'base64';
-    } catch (error) {
-      console.error('加载设置失败:', error);
+const loadSettings = async () => {
+  try {
+    // 尝试从API加载设置
+    const response = await settingsApi.getSettings();
+    settings.autoRefresh = response.data.autoRefresh;
+    settings.refreshInterval = response.data.refreshInterval;
+    settings.defaultFormat = response.data.defaultFormat;
+  } catch (error) {
+    console.error('从API加载设置失败:', error);
+    
+    // 如果API加载失败，尝试从本地存储加载
+    const savedSettings = localStorage.getItem('settings');
+    if (savedSettings) {
+      try {
+        const parsed = JSON.parse(savedSettings);
+        settings.autoRefresh = parsed.autoRefresh ?? false;
+        settings.refreshInterval = parsed.refreshInterval ?? 6;
+        settings.defaultFormat = parsed.defaultFormat ?? 'base64';
+      } catch (error) {
+        console.error('加载设置失败:', error);
+      }
     }
   }
 };
 
 // 初始化
-onMounted(() => {
-  loadSettings();
+onMounted(async () => {
+  await loadSettings();
   checkBackendStatus();
   
   if (subscriptionStore.subscriptions.length === 0) {

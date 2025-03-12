@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"proxy-subscription/api"    // 修改导入路径
 	"proxy-subscription/models" // 修改导入路径
+	"proxy-subscription/services" // 添加服务导入
 	"strings"
 
 	"github.com/gin-contrib/cors"
@@ -21,6 +22,10 @@ func main() {
 	if err := models.InitDB(); err != nil {
 		log.Fatalf("数据库初始化失败: %v", err)
 	}
+
+	// 初始化定时任务调度器
+	services.InitScheduler()
+	defer services.StopScheduler()
 
 	r := gin.Default()
 
@@ -46,6 +51,10 @@ func main() {
 		// 代理节点相关API
 		apiGroup.GET("/proxies", api.GetProxies)
 		apiGroup.GET("/proxies/:id", api.GetProxy)
+
+		// 设置相关API
+		apiGroup.GET("/settings", api.GetSettings)
+		apiGroup.POST("/settings", api.SaveSettings)
 
 		// 合并订阅输出
 		apiGroup.GET("/merged", api.GetMergedSubscription)
