@@ -16,21 +16,26 @@ jobs:
     name: Build and Release
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Add this permission to allow creating releases
+      contents: write  # 允许创建发布
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整历史以便正确处理版本标签
       
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.23.5'  # 使用与 go.mod 匹配的版本
+          cache: true  # 启用 Go 模块缓存
       
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'  # 使用更新的 Node.js 版本
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
       
       - name: Get version from tag or input
         id: get_version
@@ -41,48 +46,49 @@ jobs:
             echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
           fi
       
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci  # 使用 ci 而不是 install 以确保一致性
+      
       - name: Build Frontend
+        working-directory: frontend
+        run: npm run build
+      
+      - name: Setup backend dist directory
         run: |
-          cd frontend
-          npm install
-          npm run build
-          cd ..
           mkdir -p backend/dist
           cp -r frontend/dist/* backend/dist/
+      
+      - name: Go mod tidy
+        working-directory: backend
+        run: go mod tidy
       
       - name: Build for Windows
         run: |
           mkdir -p dist/windows
           cd backend
-          go mod tidy
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ../dist/windows/proxy-subscription.exe .
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ../dist/windows/proxy-subscription.exe .
           cd ..
           mkdir -p dist/windows/data
           cp README.md dist/windows/
-          cd dist
-          zip -r proxy-subscription-windows-amd64.zip windows/
       
       - name: Build for Linux
         run: |
           mkdir -p dist/linux
           cd backend
-          go mod tidy
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ../dist/linux/proxy-subscription .
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${{ steps.get_version.outputs.VERSION }}" -o ../dist/linux/proxy-subscription .
           cd ..
           mkdir -p dist/linux/data
           cp README.md dist/linux/
-          cd dist
-          tar -czvf proxy-subscription-linux-amd64.tar.gz linux/
-      - name: Create a new tag
-        id: tag
+      
+      - name: Package artifacts
         run: |
-          TAG=${{ steps.get_version.outputs.VERSION }}  # Remove the space after '='
-          git tag $TAG
-          git push origin $TAG
-
+          cd dist
+          zip -r proxy-subscription-windows-amd64.zip windows/
+          tar -czvf proxy-subscription-linux-amd64.tar.gz linux/
+      
       - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ steps.get_version.outputs.VERSION }}
           draft: false

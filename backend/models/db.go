@@ -42,7 +42,7 @@ func InitDB() error {
 	}
 
 	// 自动迁移表结构
-	if err := DB.AutoMigrate(&Subscription{}, &Proxy{}); err != nil {
+	if err := DB.AutoMigrate(&Subscription{}, &Proxy{}, &Setting{}); err != nil {
 		return err
 	}
 

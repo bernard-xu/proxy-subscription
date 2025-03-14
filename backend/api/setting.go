@@ -7,6 +7,7 @@ import (
 	"proxy-subscription/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // SettingRequest 设置请求结构
