@@ -2,13 +2,11 @@ package models
 
 import (
 	"time"
-
-	"gorm.io/gorm"
 )
 
 // Subscription 订阅模型
 type Subscription struct {
-	gorm.Model
+	BaseModel
 	Name        string    `json:"name" gorm:"not null"`
 	URL         string    `json:"url" gorm:"not null"`
 	Type        string    `json:"type" gorm:"not null"` // 支持的订阅类型，如v2ray, trojan, ss等
@@ -19,8 +17,8 @@ type Subscription struct {
 
 // Proxy 代理节点模型
 type Proxy struct {
-	gorm.Model
-	SubscriptionID uint   `json:"subscriptionId" gorm:"not null"`
+	BaseModel
+	SubscriptionID uint   `json:"subscription_id" gorm:"not null"`
 	Name           string `json:"name" gorm:"not null"`
 	Type           string `json:"type" gorm:"not null"` // v2ray, ss, trojan等
 	Server         string `json:"server" gorm:"not null"`
