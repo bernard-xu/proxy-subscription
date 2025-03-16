@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -171,7 +172,7 @@ func generateVmessURL(proxy models.Proxy) string {
 
 // 生成Shadowsocks URL
 func generateSSURL(proxy models.Proxy) string {
-	// 格式：ss://base64(method:password)@server:port
+	// 格式：ss://base64(method:password)@server:port?plugin=...#name
 	if proxy.Method == "" || proxy.Password == "" {
 		return ""
 	}
@@ -180,13 +181,39 @@ func generateSSURL(proxy models.Proxy) string {
 	auth := proxy.Method + ":" + proxy.Password
 	encoded := base64.RawURLEncoding.EncodeToString([]byte(auth))
 
-	// 构建完整URL
-	return "ss://" + encoded + "@" + proxy.Server + ":" + strconv.Itoa(proxy.Port)
+	// 构建基本URL
+	result := "ss://" + encoded + "@" + proxy.Server + ":" + strconv.Itoa(proxy.Port)
+
+	// 添加查询参数
+	params := make([]string, 0)
+
+	// 添加插件信息
+	if proxy.Plugin != "" {
+		pluginStr := proxy.Plugin
+		if proxy.PluginOpts != "" {
+			pluginStr += ";" + proxy.PluginOpts
+		}
+		params = append(params, "plugin="+url.QueryEscape(pluginStr))
+	}
+
+	// 如果有参数，添加到URL
+	if len(params) > 0 {
+		result += "?" + strings.Join(params, "&")
+	}
+
+	// 添加节点名称作为fragment
+	if proxy.Name != "" {
+		// URL编码节点名称
+		encodedName := url.QueryEscape(proxy.Name)
+		result += "#" + encodedName
+	}
+
+	return result
 }
 
 // 生成Trojan URL
 func generateTrojanURL(proxy models.Proxy) string {
-	// 格式：trojan://password@server:port?sni=xxx&alpn=xxx
+	// 格式：trojan://password@server:port?sni=xxx&alpn=xxx#name
 	if proxy.Password == "" {
 		return ""
 	}
@@ -202,10 +229,39 @@ func generateTrojanURL(proxy models.Proxy) string {
 	if proxy.ALPN != "" {
 		params = append(params, "alpn="+proxy.ALPN)
 	}
+	if proxy.AllowInsecure {
+		params = append(params, "allowInsecure=1")
+	}
+
+	// 添加其他可能的参数（从RawConfig中提取）
+	if proxy.RawConfig != "" {
+		var rawConfig map[string]interface{}
+		if err := json.Unmarshal([]byte(proxy.RawConfig), &rawConfig); err == nil {
+			for key, value := range rawConfig {
+				// 跳过已处理的字段和非字符串值
+				if key == "server" || key == "port" || key == "password" ||
+					key == "sni" || key == "alpn" || key == "allowInsecure" {
+					continue
+				}
+
+				// 只处理字符串值
+				if strValue, ok := value.(string); ok && strValue != "" {
+					params = append(params, key+"="+url.QueryEscape(strValue))
+				}
+			}
+		}
+	}
 
 	// 如果有参数，添加到URL
 	if len(params) > 0 {
 		result += "?" + strings.Join(params, "&")
+	}
+
+	// 添加节点名称作为fragment
+	if proxy.Name != "" {
+		// URL编码节点名称
+		encodedName := url.QueryEscape(proxy.Name)
+		result += "#" + encodedName
 	}
 
 	return result
@@ -219,12 +275,64 @@ func generateClashConfig(proxies []models.Proxy) string {
 	yaml.WriteString("proxies:\n")
 	for _, proxy := range proxies {
 		// 根据代理类型生成对应的Clash配置
-		// 这里只是一个简化的示例
 		yaml.WriteString("  - name: " + proxy.Name + "\n")
 		yaml.WriteString("    type: " + proxy.Type + "\n")
 		yaml.WriteString("    server: " + proxy.Server + "\n")
 		yaml.WriteString("    port: " + strconv.Itoa(proxy.Port) + "\n")
-		// 添加其他配置...
+
+		// 根据代理类型添加特定配置
+		switch proxy.Type {
+		case "ss":
+			yaml.WriteString("    cipher: " + proxy.Method + "\n")
+			yaml.WriteString("    password: " + proxy.Password + "\n")
+
+			// 添加插件配置
+			if proxy.Plugin != "" {
+				yaml.WriteString("    plugin: " + proxy.Plugin + "\n")
+				if proxy.PluginOpts != "" {
+					yaml.WriteString("    plugin-opts:\n")
+					// 解析插件选项
+					opts := strings.Split(proxy.PluginOpts, ";")
+					for _, opt := range opts {
+						if kv := strings.SplitN(opt, "=", 2); len(kv) == 2 {
+							yaml.WriteString("      " + kv[0] + ": " + kv[1] + "\n")
+						}
+					}
+				}
+			}
+
+		case "vmess":
+			yaml.WriteString("    uuid: " + proxy.UUID + "\n")
+			if proxy.Network != "" {
+				yaml.WriteString("    network: " + proxy.Network + "\n")
+			}
+			if proxy.TLS {
+				yaml.WriteString("    tls: true\n")
+			}
+			if proxy.Path != "" {
+				yaml.WriteString("    ws-path: " + proxy.Path + "\n")
+			}
+			if proxy.Host != "" {
+				yaml.WriteString("    ws-headers:\n")
+				yaml.WriteString("      Host: " + proxy.Host + "\n")
+			}
+
+		case "trojan":
+			yaml.WriteString("    password: " + proxy.Password + "\n")
+			if proxy.SNI != "" {
+				yaml.WriteString("    sni: " + proxy.SNI + "\n")
+			}
+			if proxy.ALPN != "" {
+				yaml.WriteString("    alpn:\n")
+				for _, alpn := range strings.Split(proxy.ALPN, ",") {
+					yaml.WriteString("      - " + alpn + "\n")
+				}
+			}
+			if proxy.AllowInsecure {
+				yaml.WriteString("    skip-cert-verify: true\n")
+			}
+		}
+
 		yaml.WriteString("\n")
 	}
 
@@ -235,22 +343,45 @@ func generateClashConfig(proxies []models.Proxy) string {
 func generateJSONConfig(proxies []models.Proxy) (string, error) {
 	// 实现JSON配置生成逻辑
 	type jsonProxy struct {
-		Name   string `json:"name"`
-		Type   string `json:"type"`
-		Server string `json:"server"`
-		Port   int    `json:"port"`
-		// 其他字段...
+		Name          string `json:"name"`
+		Type          string `json:"type"`
+		Server        string `json:"server"`
+		Port          int    `json:"port"`
+		UUID          string `json:"uuid,omitempty"`
+		Password      string `json:"password,omitempty"`
+		Method        string `json:"method,omitempty"`
+		Network       string `json:"network,omitempty"`
+		Path          string `json:"path,omitempty"`
+		Host          string `json:"host,omitempty"`
+		TLS           bool   `json:"tls,omitempty"`
+		SNI           string `json:"sni,omitempty"`
+		ALPN          string `json:"alpn,omitempty"`
+		Plugin        string `json:"plugin,omitempty"`
+		PluginOpts    string `json:"plugin_opts,omitempty"`
+		AllowInsecure bool   `json:"allow_insecure,omitempty"`
 	}
 
 	var jsonProxies []jsonProxy
 	for _, proxy := range proxies {
-		jsonProxies = append(jsonProxies, jsonProxy{
-			Name:   proxy.Name,
-			Type:   proxy.Type,
-			Server: proxy.Server,
-			Port:   proxy.Port,
-			// 设置其他字段...
-		})
+		jp := jsonProxy{
+			Name:          proxy.Name,
+			Type:          proxy.Type,
+			Server:        proxy.Server,
+			Port:          proxy.Port,
+			UUID:          proxy.UUID,
+			Password:      proxy.Password,
+			Method:        proxy.Method,
+			Network:       proxy.Network,
+			Path:          proxy.Path,
+			Host:          proxy.Host,
+			TLS:           proxy.TLS,
+			SNI:           proxy.SNI,
+			ALPN:          proxy.ALPN,
+			Plugin:        proxy.Plugin,
+			PluginOpts:    proxy.PluginOpts,
+			AllowInsecure: proxy.AllowInsecure,
+		}
+		jsonProxies = append(jsonProxies, jp)
 	}
 
 	jsonData, err := json.Marshal(jsonProxies)

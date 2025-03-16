@@ -32,5 +32,8 @@ type Proxy struct {
 	TLS            bool   `json:"tls"`
 	SNI            string `json:"sni"`
 	ALPN           string `json:"alpn"`
+	Plugin         string `json:"plugin"`                     // Shadowsocks插件名称
+	PluginOpts     string `json:"plugin_opts"`                // Shadowsocks插件选项
+	AllowInsecure  bool   `json:"allow_insecure"`             // 是否允许不安全连接（跳过证书验证）
 	RawConfig      string `json:"rawConfig" gorm:"type:text"` // 存储原始配置
 }
