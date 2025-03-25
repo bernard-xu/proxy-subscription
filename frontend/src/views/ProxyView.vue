@@ -35,11 +35,7 @@
             </el-table-column>
             <el-table-column prop="server" label="服务器" min-width="150" show-overflow-tooltip />
             <el-table-column prop="port" label="端口" width="100" />
-            <el-table-column label="订阅来源" min-width="150">
-                <template #default="scope">
-                    {{ getSubscriptionName(scope.row.subscriptionId) }}
-                </template>
-            </el-table-column>
+            <el-table-column prop="subscription_name" label="订阅来源" min-width="150" />
             <el-table-column label="操作" width="150" fixed="right">
                 <template #default="scope">
                     <el-button-group>
@@ -133,7 +129,7 @@ const filteredProxies = computed(() => {
 
     // 按订阅过滤
     if (selectedSubscription.value) {
-        result = result.filter(proxy => proxy.subscriptionId === selectedSubscription.value);
+        result = result.filter(proxy => proxy.subscription_id === selectedSubscription.value);
     }
 
     // 按搜索关键词过滤
@@ -181,9 +177,7 @@ const handleSubscriptionChange = () => {
 
 // 加载数据
 onMounted(async () => {
-    if (subscriptionStore.subscriptions.length === 0) {
-        await subscriptionStore.fetchSubscriptions();
-    }
+    await subscriptionStore.fetchSubscriptions();
     await proxyStore.fetchProxies();
 });
 

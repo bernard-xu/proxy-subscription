@@ -23,7 +23,7 @@ export interface Subscription {
 
 export interface Proxy {
   id?: number;
-  subscriptionId: number;
+  subscription_id: number;
   name: string;
   type: string;
   server: string;

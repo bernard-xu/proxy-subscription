@@ -2,16 +2,7 @@ package utils
 
 import (
 	"encoding/base64"
-	"regexp"
-	"strings"
 )
-
-// IsBase64 检查字符串是否为Base64编码
-func IsBase64(s string) bool {
-	s = strings.TrimSpace(s)
-	_, err := base64.StdEncoding.DecodeString(s)
-	return err == nil && regexp.MustCompile(`^[A-Za-z0-9+/]*={0,2}$`).MatchString(s)
-}
 
 // GenerateProxyURL 根据代理信息生成URL
 func GenerateProxyURL(proxyType, server, port, uuid, password, method string) string {
@@ -26,10 +17,7 @@ func EncodeBase64(s string) string {
 }
 
 // DecodeBase64 Base64解码
-func DecodeBase64(s string) (string, error) {
-	bytes, err := base64.StdEncoding.DecodeString(s)
-	if err != nil {
-		return "", err
-	}
-	return string(bytes), nil
+func DecodeBase64(s string) ([]byte, error) {
+	bytes, _ := base64.StdEncoding.DecodeString(s)
+	return bytes, nil
 }

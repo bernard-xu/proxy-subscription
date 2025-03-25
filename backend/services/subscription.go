@@ -83,13 +83,8 @@ func fetchSubscriptionContent(url string) (string, error) {
 // parseSubscriptionContent 解析订阅内容
 func parseSubscriptionContent(content string, subType string) ([]models.Proxy, error) {
 	// 解码Base64内容
-	if utils.IsBase64(content) {
-		decoded, err := base64.StdEncoding.DecodeString(content)
-		if err != nil {
-			return nil, err
-		}
-		content = string(decoded)
-	}
+	decoded, _ := utils.DecodeBase64(content)
+	content = string(decoded)
 
 	// 根据订阅类型解析内容
 	switch subType {
@@ -260,10 +255,7 @@ func parseVmessLink(link string) (models.Proxy, error) {
 
 	// 解码base64内容
 	encoded := link[8:]
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return models.Proxy{}, fmt.Errorf("base64 decode error: %v", err)
-	}
+	decoded, _ := utils.DecodeBase64(encoded)
 
 	// 解析JSON配置
 	var config struct {
@@ -392,10 +384,7 @@ func parseSSLink(link string) (models.Proxy, error) {
 		decodedBytes, err := base64.RawURLEncoding.DecodeString(ssURL)
 		if err != nil {
 			// 尝试标准base64解码
-			decodedBytes, err = base64.StdEncoding.DecodeString(ssURL)
-			if err != nil {
-				return models.Proxy{}, fmt.Errorf("base64解码失败: %v", err)
-			}
+			decodedBytes, _ = utils.DecodeBase64(ssURL)
 		}
 
 		// 解码后应该是 method:password@host:port 格式
@@ -424,10 +413,7 @@ func parseSSLink(link string) (models.Proxy, error) {
 		decodedAuth, err := base64.RawURLEncoding.DecodeString(authPart)
 		if err != nil {
 			// 尝试标准base64解码
-			decodedAuth, err = base64.StdEncoding.DecodeString(authPart)
-			if err != nil {
-				return models.Proxy{}, fmt.Errorf("认证信息解码失败: %v", err)
-			}
+			decodedAuth, _ = utils.DecodeBase64(authPart)
 		}
 		authPart = string(decodedAuth)
 	}
@@ -448,7 +434,7 @@ func parseSSLink(link string) (models.Proxy, error) {
 	}
 
 	server := serverParts[0]
-	portStr := serverParts[1]
+	portStr := strings.TrimRight(serverParts[1], "/")
 
 	// 解析端口
 	port, err := strconv.Atoi(portStr)
@@ -1817,10 +1803,7 @@ func parseSSRLink(link string) (models.Proxy, error) {
 	decodedBytes, err := base64.RawURLEncoding.DecodeString(ssrURL)
 	if err != nil {
 		// 尝试标准base64解码
-		decodedBytes, err = base64.StdEncoding.DecodeString(ssrURL)
-		if err != nil {
-			return models.Proxy{}, fmt.Errorf("base64解码失败: %v", err)
-		}
+		decodedBytes, _ = utils.DecodeBase64(ssrURL)
 	}
 
 	decoded := string(decodedBytes)
@@ -1856,10 +1839,7 @@ func parseSSRLink(link string) (models.Proxy, error) {
 	passwordBytes, err := base64.RawURLEncoding.DecodeString(passwordBase64)
 	if err != nil {
 		// 尝试标准base64解码
-		passwordBytes, err = base64.StdEncoding.DecodeString(passwordBase64)
-		if err != nil {
-			return models.Proxy{}, fmt.Errorf("密码解码失败: %v", err)
-		}
+		passwordBytes, _ = utils.DecodeBase64(passwordBase64)
 	}
 	password := string(passwordBytes)
 
@@ -1894,11 +1874,7 @@ func parseSSRLink(link string) (models.Proxy, error) {
 			valueBytes, err := base64.RawURLEncoding.DecodeString(value)
 			if err != nil {
 				// 尝试标准base64解码
-				valueBytes, err = base64.StdEncoding.DecodeString(value)
-				if err != nil {
-					// 如果解码失败，使用原始值
-					valueBytes = []byte(value)
-				}
+				valueBytes, _ = utils.DecodeBase64(value)
 			}
 			decodedValue := string(valueBytes)
 

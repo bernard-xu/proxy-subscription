@@ -13,7 +13,7 @@ export const useProxyStore = defineStore('proxy', {
       return state.proxies.find(proxy => proxy.id === id);
     },
     getProxiesBySubscription: (state) => (subscriptionId: number) => {
-      return state.proxies.filter(proxy => proxy.subscriptionId === subscriptionId);
+      return state.proxies.filter(proxy => proxy.subscription_id === subscriptionId);
     },
   },
   

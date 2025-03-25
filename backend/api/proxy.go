@@ -16,20 +16,25 @@ import (
 
 // GetProxies 获取所有代理节点
 func GetProxies(c *gin.Context) {
-	var proxies []models.Proxy
-	query := models.DB.Model(&models.Proxy{})
+	type ProxyWithSubscription struct {
+		models.Proxy
+		SubscriptionName string `json:"subscription_name"`
+	}
+
+	var results []ProxyWithSubscription
+	query := models.DB.Model(&models.Proxy{}).Select("proxies.*, subscriptions.name as subscription_name").Joins("left join subscriptions on proxies.subscription_id = subscriptions.id")
 
 	// 支持按订阅ID过滤
 	if subID := c.Query("subscription_id"); subID != "" {
-		query = query.Where("subscription_id = ?", subID)
+		query = query.Where("proxies.subscription_id = ?", subID)
 	}
 
-	if err := query.Find(&proxies).Error; err != nil {
+	if err := query.Find(&results).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, proxies)
+	c.JSON(http.StatusOK, results)
 }
 
 // GetProxy 获取单个代理节点
