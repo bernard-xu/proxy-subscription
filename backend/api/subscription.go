@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"proxy-subscription/models"
@@ -30,6 +31,9 @@ func AddSubscription(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 处理URL空格
+	subscription.URL = strings.TrimSpace(subscription.URL)
 
 	// 验证订阅URL
 	if subscription.URL == "" {
@@ -77,6 +81,9 @@ func UpdateSubscription(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 新增URL空格处理
+	subscription.URL = strings.TrimSpace(subscription.URL)
 
 	// 更新数据库
 	if err := models.DB.Save(&subscription).Error; err != nil {

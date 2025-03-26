@@ -257,88 +257,47 @@ func parseVmessLink(link string) (models.Proxy, error) {
 	encoded := link[8:]
 	decoded, _ := utils.DecodeBase64(encoded)
 
-	// 解析JSON配置
-	var config struct {
-		Add  string `json:"add"`
-		Port int    `json:"port"` // 注意：有些配置可能是字符串格式的端口
-		ID   string `json:"id"`
-		Aid  int    `json:"aid"`
-		Net  string `json:"net"`
-		Type string `json:"type"`
-		TLS  string `json:"tls"`
-		Host string `json:"host"`
-		Path string `json:"path"`
-		PS   string `json:"ps"` // 节点名称
-		V    int    `json:"v"`  // 版本
+	// 使用map[string]interface{}解析JSON，以处理字段类型的多样性
+	var configMap map[string]interface{}
+	if err := json.Unmarshal(decoded, &configMap); err != nil {
+		return models.Proxy{}, fmt.Errorf("json unmarshal error: %v", err)
 	}
 
-	if err := json.Unmarshal(decoded, &config); err != nil {
-		// 尝试处理端口为字符串的情况
-		var configWithStringPort struct {
-			Add  string `json:"add"`
-			Port string `json:"port"`
-			ID   string `json:"id"`
-			Aid  int    `json:"aid"`
-			Net  string `json:"net"`
-			Type string `json:"type"`
-			TLS  string `json:"tls"`
-			Host string `json:"host"`
-			Path string `json:"path"`
-			PS   string `json:"ps"`
-			V    int    `json:"v"`
-		}
-
-		if jsonErr := json.Unmarshal(decoded, &configWithStringPort); jsonErr != nil {
-			return models.Proxy{}, fmt.Errorf("json unmarshal error: %v", err)
-		}
-
-		// 转换端口字符串为整数
-		portInt, portErr := strconv.Atoi(configWithStringPort.Port)
-		if portErr != nil {
-			return models.Proxy{}, fmt.Errorf("invalid port format: %v", portErr)
-		}
-
-		// 将字符串端口的配置复制到原始配置
-		config.Add = configWithStringPort.Add
-		config.Port = portInt
-		config.ID = configWithStringPort.ID
-		config.Aid = configWithStringPort.Aid
-		config.Net = configWithStringPort.Net
-		config.Type = configWithStringPort.Type
-		config.TLS = configWithStringPort.TLS
-		config.Host = configWithStringPort.Host
-		config.Path = configWithStringPort.Path
-		config.PS = configWithStringPort.PS
-		config.V = configWithStringPort.V
-	}
+	// 从map中提取字段，处理不同类型的情况
+	server := utils.GetString(configMap, "add")
+	port := utils.GetInt(configMap, "port")
+	uuid := utils.GetString(configMap, "id")
+	network := utils.GetString(configMap, "net")
+	tls := utils.GetString(configMap, "tls")
+	host := utils.GetString(configMap, "host")
+	path := utils.GetString(configMap, "path")
+	nodeName := utils.GetString(configMap, "ps")
 
 	// 验证必要字段
-	if config.Add == "" || config.Port == 0 || config.ID == "" {
+	if server == "" || port == 0 || uuid == "" {
 		return models.Proxy{}, errors.New("missing required vmess parameters")
 	}
 
 	// 设置节点名称，如果PS为空则使用默认名称
-	nodeName := "VMess Node"
-	if config.PS != "" {
-		nodeName = config.PS
+	if nodeName == "" {
+		nodeName = "VMess Node"
 	}
 
 	// 处理路径，确保有默认值
-	path := "/"
-	if config.Path != "" {
-		path = config.Path
+	if path == "" {
+		path = "/"
 	}
 
 	return models.Proxy{
 		Type:      "vmess",
 		Name:      nodeName,
-		Server:    config.Add,
-		Port:      config.Port,
-		UUID:      config.ID,
-		Network:   config.Net,
+		Server:    server,
+		Port:      port,
+		UUID:      uuid,
+		Network:   network,
 		Path:      path,
-		Host:      config.Host,
-		TLS:       config.TLS == "tls",
+		Host:      host,
+		TLS:       tls == "tls",
 		RawConfig: string(decoded),
 	}, nil
 }
