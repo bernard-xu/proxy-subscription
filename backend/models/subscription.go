@@ -7,12 +7,13 @@ import (
 // Subscription 订阅模型
 type Subscription struct {
 	BaseModel
-	Name        string    `json:"name" gorm:"not null"`
-	URL         string    `json:"url" gorm:"not null"`
-	Type        string    `json:"type" gorm:"not null"` // 支持的订阅类型，如v2ray, trojan, ss等
-	Enabled     bool      `json:"enabled" gorm:"default:true"`
-	LastUpdated time.Time `json:"lastUpdated"`
-	Proxies     []Proxy   `json:"proxies,omitempty" gorm:"foreignKey:SubscriptionID"`
+	Name            string    `json:"name" gorm:"not null"`
+	URL             string    `json:"url" gorm:"not null"`
+	Type            string    `json:"type" gorm:"not null"` // 支持的订阅类型，如v2ray, trojan, ss等
+	Enabled         bool      `json:"enabled" gorm:"default:true"`
+	LastUpdated     time.Time `json:"lastUpdated"`
+	Proxies         []Proxy   `json:"proxies,omitempty" gorm:"foreignKey:SubscriptionID"`
+	ValidProxyCount int       `json:"valid_proxy_count"`
 }
 
 // Proxy 代理节点模型

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"proxy-subscription/models"
+	"proxy-subscription/services"
 
 	"github.com/gin-gonic/gin"
 )
@@ -58,6 +59,15 @@ func GetProxy(c *gin.Context) {
 func GetMergedSubscription(c *gin.Context) {
 	format := c.DefaultQuery("format", "base64")
 
+	// 尝试从缓存获取
+	if content, contentType, found := services.GetSubscriptionCache(format); found {
+		c.Header("Content-Type", contentType)
+		c.Header("X-Cache", "HIT")
+		c.String(http.StatusOK, content)
+		return
+	}
+
+	// 缓存未命中，生成新的内容
 	// 获取所有启用的订阅
 	var subscriptions []models.Subscription
 	if err := models.DB.Where("enabled = ?", true).Find(&subscriptions).Error; err != nil {
@@ -81,8 +91,12 @@ func GetMergedSubscription(c *gin.Context) {
 		return
 	}
 
+	// 存入缓存
+	services.SetSubscriptionCache(format, content, contentType)
+
 	// 设置响应头
 	c.Header("Content-Type", contentType)
+	c.Header("X-Cache", "MISS")
 	c.String(http.StatusOK, content)
 }
 

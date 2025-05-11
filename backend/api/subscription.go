@@ -93,6 +93,9 @@ func AddSubscription(c *gin.Context) {
 		return
 	}
 
+	// 清除缓存
+	services.InvalidateCache()
+
 	c.JSON(http.StatusCreated, subscription)
 }
 
@@ -125,6 +128,9 @@ func UpdateSubscription(c *gin.Context) {
 		return
 	}
 
+	// 清除缓存
+	services.InvalidateCache()
+
 	c.JSON(http.StatusOK, subscription)
 }
 
@@ -151,6 +157,10 @@ func DeleteSubscription(c *gin.Context) {
 	}
 
 	tx.Commit()
+
+	// 清除缓存
+	services.InvalidateCache()
+
 	c.JSON(http.StatusOK, gin.H{"message": "订阅已删除"})
 }
 
@@ -191,20 +201,13 @@ func RefreshSubscription(c *gin.Context) {
 		validCount = 0
 	}
 
+	// 清除缓存
+	services.InvalidateCache()
+	subscription.ValidProxyCount = int(validCount)
+
 	// 返回刷新成功信息及有效节点数量
 	c.JSON(http.StatusOK, gin.H{
-		"message":           "订阅刷新成功",
-		"subscription":      subscription,
-		"valid_proxy_count": validCount,
-		"total_proxy_count": countTotalProxies(subscription.ID),
+		"message":      "订阅刷新成功",
+		"subscription": subscription,
 	})
-}
-
-// countTotalProxies 统计指定订阅的总节点数量
-func countTotalProxies(subscriptionID uint) int64 {
-	var count int64
-	models.DB.Model(&models.Proxy{}).
-		Where("subscription_id = ?", subscriptionID).
-		Count(&count)
-	return count
 }

@@ -2,7 +2,13 @@
     <div class="subscription-container">
         <div class="page-header">
             <h2>订阅管理</h2>
-            <el-button type="primary" @click="showAddDialog">添加订阅</el-button>
+            <div class="header-buttons">
+                <el-button type="primary" @click="refreshSubscriptionList">
+                    <el-icon><Refresh /></el-icon>
+                    刷新
+                </el-button>
+                <el-button type="primary" @click="showAddDialog">添加订阅</el-button>
+            </div>
         </div>
 
         <el-card v-if="subscriptionStore.loading" class="loading-card">
@@ -27,7 +33,7 @@
                                 <el-icon>
                                     <Refresh />
                                 </el-icon>
-                                刷新
+                                刷新节点
                             </el-button>
                             <el-button size="small" @click="showEditDialog(subscription)">
                                 <el-icon>
@@ -219,6 +225,16 @@ const confirmDelete = (subscription: Subscription) => {
     });
 };
 
+// 刷新订阅列表
+const refreshSubscriptionList = async () => {
+    try {
+        await subscriptionStore.fetchSubscriptions();
+        ElMessage.success('订阅列表刷新成功');
+    } catch (error: any) {
+        ElMessage.error(error.message || '刷新失败');
+    }
+};
+
 // 加载数据
 onMounted(() => {
     subscriptionStore.fetchSubscriptions();
@@ -236,6 +252,11 @@ onMounted(() => {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
+}
+
+.header-buttons {
+    display: flex;
+    gap: 10px;
 }
 
 .subscription-card {
