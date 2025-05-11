@@ -2,12 +2,26 @@ import axios from 'axios';
 
 const API_URL = 'http://localhost:8080/api';
 
+// 获取存储的token
+const storedToken = localStorage.getItem('token');
+
 const api = axios.create({
   baseURL: API_URL,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
+    // 如果存在token，则添加到默认请求头
+    ...(storedToken ? { 'Authorization': `Bearer ${storedToken}` } : {})
   },
+});
+
+// 请求拦截器，确保每次请求都带上最新的token
+api.interceptors.request.use(config => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 export interface Subscription {

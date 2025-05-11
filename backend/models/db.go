@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,6 +12,12 @@ import (
 )
 
 var DB *gorm.DB
+
+// 默认管理员账户
+const (
+	DefaultAdminUsername = "admin"
+	DefaultAdminPassword = "admin0505"
+)
 
 // InitDB 初始化数据库连接
 func InitDB() error {
@@ -48,10 +55,39 @@ func InitDB() error {
 	}
 
 	// 自动迁移表结构
-	if err := DB.AutoMigrate(&Subscription{}, &Proxy{}, &Setting{}); err != nil {
+	if err := DB.AutoMigrate(&Subscription{}, &Proxy{}, &Setting{}, &User{}); err != nil {
+		return err
+	}
+
+	// 创建默认管理员账户
+	if err := createDefaultAdmin(); err != nil {
 		return err
 	}
 
 	log.Println("数据库初始化成功，位置:", dbPath)
+	log.Printf("默认管理员账号: %s, 密码: %s\n", DefaultAdminUsername, DefaultAdminPassword)
+	return nil
+}
+
+// createDefaultAdmin 创建默认管理员账户
+func createDefaultAdmin() error {
+	var count int64
+	DB.Model(&User{}).Count(&count)
+
+	// 只有当没有任何用户时才创建默认管理员
+	if count == 0 {
+		admin := User{
+			Username:     DefaultAdminUsername,
+			PasswordHash: HashPassword(DefaultAdminPassword),
+			IsAdmin:      true,
+		}
+
+		result := DB.Create(&admin)
+		if result.Error != nil {
+			return fmt.Errorf("创建默认管理员账户失败: %v", result.Error)
+		}
+		log.Println("创建默认管理员账户成功")
+	}
+
 	return nil
 }

@@ -6,6 +6,7 @@ require (
 	github.com/gin-contrib/cors v1.7.3
 	github.com/gin-gonic/gin v1.10.0
 	github.com/glebarez/sqlite v1.11.0
+	github.com/golang-jwt/jwt/v4 v4.5.2
 	gorm.io/gorm v1.25.12
 )
 

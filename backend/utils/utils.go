@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // GenerateProxyURL 根据代理信息生成URL
@@ -58,4 +59,18 @@ func GetInt(m map[string]interface{}, key string) int {
 		}
 	}
 	return 0
+}
+
+// ExtractBearerToken 从Authorization头提取token
+func ExtractBearerToken(header string) string {
+	if header == "" {
+		return ""
+	}
+
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return ""
+	}
+
+	return parts[1]
 }

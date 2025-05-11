@@ -1,18 +1,17 @@
 <template>
   <el-config-provider :locale="zhCn">
-    <div class="app-container">
-      <el-container>
+    <div id="app">
+      <el-container v-if="$route.name !== 'login'">
         <el-header height="60px">
-          <div class="header-content">
-            <h1>NekoRay 配置管理</h1>
-          </div>
+          <AppHeader />
         </el-header>
         <el-container>
-          <el-aside width="200px">
+          <el-aside width="220px">
             <el-menu
               router
-              :default-active="$route.path"
-              class="el-menu-vertical"
+              default-active="$route.path"
+              class="side-menu"
+              :collapse="false"
             >
               <el-menu-item index="/">
                 <el-icon><HomeFilled /></el-icon>
@@ -24,59 +23,86 @@
               </el-menu-item>
               <el-menu-item index="/proxies">
                 <el-icon><Connection /></el-icon>
-                <span>节点列表</span>
+                <span>节点管理</span>
               </el-menu-item>
               <el-menu-item index="/settings">
                 <el-icon><Setting /></el-icon>
-                <span>设置</span>
+                <span>系统设置</span>
               </el-menu-item>
             </el-menu>
           </el-aside>
           <el-main>
-            <router-view />
+            <router-view></router-view>
           </el-main>
         </el-container>
       </el-container>
+      
+      <!-- 登录页面使用不同布局 -->
+      <div v-else class="login-layout">
+        <router-view></router-view>
+      </div>
     </div>
   </el-config-provider>
 </template>
 
 <script setup lang="ts">
-import { HomeFilled, Document, Connection, Setting } from '@element-plus/icons-vue';
 import { ElConfigProvider } from 'element-plus';
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
+import { onMounted } from 'vue'
+import { useAuthStore } from './stores/auth'
+import AppHeader from './components/AppHeader.vue'
+import { HomeFilled, Document, Connection, Setting } from '@element-plus/icons-vue';
+
+const authStore = useAuthStore()
+
+onMounted(() => {
+  // 初始化认证状态
+  authStore.init()
+})
 </script>
 
 <style>
-.app-container {
-  height: 100vh;
+html, body, #app, .el-container {
   width: 100vw;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+#app {
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  height: 100vh;
 }
 
 .el-header {
-  background-color: #409EFF;
-  color: white;
-  display: flex;
-  align-items: center;
-}
-
-.header-content {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  padding: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
 }
 
 .el-aside {
   background-color: #f5f7fa;
+  border-right: 1px solid #e6e6e6;
+  height: calc(100vh - 60px);
+  overflow-y: auto;
 }
 
-.el-menu-vertical {
-  height: calc(100vh - 60px);
-  width: 100%;
+.side-menu {
+  height: 100%;
+  border-right: none;
 }
 
 .el-main {
-  padding: 5px;
+  background-color: #fff;
+  padding: 20px;
+  overflow-y: auto;
+  width: 100vw;
+}
+
+.login-layout {
+  width: 100vw;
+  height: 100vh;
 }
 </style>

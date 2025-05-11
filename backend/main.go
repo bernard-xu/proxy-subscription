@@ -5,8 +5,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"proxy-subscription/api"    // 修改导入路径
-	"proxy-subscription/models" // 修改导入路径
+	"proxy-subscription/api"      // 修改导入路径
+	"proxy-subscription/models"   // 修改导入路径
 	"proxy-subscription/services" // 添加服务导入
 	"strings"
 
@@ -41,23 +41,35 @@ func main() {
 	// API路由
 	apiGroup := r.Group("/api")
 	{
-		// 订阅相关API
-		apiGroup.GET("/subscriptions", api.GetSubscriptions)
-		apiGroup.POST("/subscriptions", api.AddSubscription)
-		apiGroup.PUT("/subscriptions/:id", api.UpdateSubscription)
-		apiGroup.DELETE("/subscriptions/:id", api.DeleteSubscription)
-		apiGroup.POST("/subscriptions/:id/refresh", api.RefreshSubscription)
+		// 公开API
+		apiGroup.GET("/merged", api.GetMergedSubscription) // 无需认证的合并订阅
 
-		// 代理节点相关API
-		apiGroup.GET("/proxies", api.GetProxies)
-		apiGroup.GET("/proxies/:id", api.GetProxy)
+		// 登录认证
+		apiGroup.POST("/auth/login", api.Login)
 
-		// 设置相关API
-		apiGroup.GET("/settings", api.GetSettings)
-		apiGroup.POST("/settings", api.SaveSettings)
+		// 需要认证的API
+		authGroup := apiGroup.Group("")
+		authGroup.Use(api.AuthMiddleware())
+		{
+			// 用户相关
+			authGroup.GET("/auth/user", api.GetCurrentUser)
+			authGroup.POST("/auth/change-password", api.ChangePassword)
 
-		// 合并订阅输出
-		apiGroup.GET("/merged", api.GetMergedSubscription)
+			// 订阅相关API
+			authGroup.GET("/subscriptions", api.GetSubscriptions)
+			authGroup.POST("/subscriptions", api.AddSubscription)
+			authGroup.PUT("/subscriptions/:id", api.UpdateSubscription)
+			authGroup.DELETE("/subscriptions/:id", api.DeleteSubscription)
+			authGroup.POST("/subscriptions/:id/refresh", api.RefreshSubscription)
+
+			// 代理节点相关API
+			authGroup.GET("/proxies", api.GetProxies)
+			authGroup.GET("/proxies/:id", api.GetProxy)
+
+			// 设置相关API
+			authGroup.GET("/settings", api.GetSettings)
+			authGroup.POST("/settings", api.SaveSettings)
+		}
 	}
 
 	subFS, _ := fs.Sub(staticFS, "dist")
