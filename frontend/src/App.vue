@@ -1,7 +1,7 @@
 <template>
   <el-config-provider :locale="zhCn">
     <div id="app">
-      <el-container v-if="$route.name !== 'login'">
+      <el-container v-if="$route.name !== 'login' && authStore.isAuthenticated">
         <el-header height="60px">
           <AppHeader />
         </el-header>
@@ -52,12 +52,19 @@ import { onMounted } from 'vue'
 import { useAuthStore } from './stores/auth'
 import AppHeader from './components/AppHeader.vue'
 import { HomeFilled, Document, Connection, Setting } from '@element-plus/icons-vue';
+import { useRouter } from 'vue-router'
 
 const authStore = useAuthStore()
+const router = useRouter()
 
 onMounted(() => {
   // 初始化认证状态
   authStore.init()
+  
+  // 如果未登录且当前不在登录页，重定向到登录页
+  if (!authStore.isAuthenticated && router.currentRoute.value.name !== 'login') {
+    router.push('/login')
+  }
 })
 </script>
 
