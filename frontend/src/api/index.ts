@@ -19,6 +19,7 @@ export interface Subscription {
   lastUpdated?: string;
   createdAt?: string;
   updatedAt?: string;
+  valid_proxy_count?: number;
 }
 
 export interface Proxy {

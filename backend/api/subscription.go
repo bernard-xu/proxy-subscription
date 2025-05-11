@@ -14,14 +14,38 @@ import (
 
 // GetSubscriptions 获取所有订阅
 func GetSubscriptions(c *gin.Context) {
-	var subscriptions []models.Subscription
-	result := models.DB.Find(&subscriptions)
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
+	type SubscriptionWithCount struct {
+		models.Subscription
+		ValidProxyCount int `json:"valid_proxy_count"`
+	}
+
+	var results []SubscriptionWithCount
+
+	// 使用聚合查询一次性获取所有订阅及其有效代理节点计数
+	// 首先获取所有订阅
+	query := `
+		SELECT s.*, 
+			(SELECT COUNT(*) FROM proxies p 
+			WHERE p.subscription_id = s.id 
+				AND p.server != '' 
+				AND p.port > 0 
+				AND (
+					(p.type = 'ss' AND p.method != '' AND p.password != '') OR
+					(p.type = 'vmess' AND p.uuid != '') OR
+					(p.type = 'trojan' AND p.password != '') OR
+					p.type = 'http' OR
+					p.type = 'socks'
+				)
+			) as valid_proxy_count
+		FROM subscriptions s
+	`
+
+	if err := models.DB.Raw(query).Scan(&results).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, subscriptions)
+	c.JSON(http.StatusOK, results)
 }
 
 // AddSubscription 添加新订阅

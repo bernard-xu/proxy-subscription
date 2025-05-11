@@ -49,6 +49,7 @@
                     <p><strong>类型：</strong>{{ subscription.type }}</p>
                     <p><strong>URL：</strong>{{ subscription.url }}</p>
                     <p><strong>最后更新：</strong>{{ formatDate(subscription.lastUpdated) }}</p>
+                    <p><strong>有效节点：</strong><el-tag size="small" type="success">{{ subscription.valid_proxy_count || 0 }}</el-tag> 个</p>
                 </div>
             </el-card>
         </template>

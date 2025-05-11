@@ -17,7 +17,13 @@ func InitDB() error {
 	// 确保数据目录存在
 	dbDir := os.Getenv("DATA_DIR")
 	if dbDir == "" {
-		dbDir = "./data"
+		// 获取可执行文件所在目录
+		execPath, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		execDir := filepath.Dir(execPath)
+		dbDir = filepath.Join(execDir, "data")
 	}
 
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
@@ -26,7 +32,7 @@ func InitDB() error {
 
 	dbPath := filepath.Join(dbDir, "nekoray-config.db")
 	var err error
-	
+
 	// 配置GORM
 	logLevel := logger.Info
 	if os.Getenv("GIN_MODE") == "release" {
@@ -36,7 +42,7 @@ func InitDB() error {
 	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{
 		Logger: logger.Default.LogMode(logLevel),
 	})
-	
+
 	if err != nil {
 		return err
 	}
@@ -46,6 +52,6 @@ func InitDB() error {
 		return err
 	}
 
-	log.Println("数据库初始化成功")
+	log.Println("数据库初始化成功，位置:", dbPath)
 	return nil
 }
