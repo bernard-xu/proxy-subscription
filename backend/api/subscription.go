@@ -14,38 +14,48 @@ import (
 
 // GetSubscriptions 获取所有订阅
 func GetSubscriptions(c *gin.Context) {
+	var subscriptions []models.Subscription
+
+	// 使用GORM API获取所有订阅
+	if err := models.DB.Find(&subscriptions).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 构建响应，包含有效节点计数
 	type SubscriptionWithCount struct {
 		models.Subscription
 		ValidProxyCount int `json:"valid_proxy_count"`
 	}
 
-	var results []SubscriptionWithCount
+	// 初始化一个空数组，确保即使没有订阅也返回[]而不是null
+	response := make([]SubscriptionWithCount, 0)
 
-	// 使用聚合查询一次性获取所有订阅及其有效代理节点计数
-	// 首先获取所有订阅
-	query := `
-		SELECT s.*, 
-			(SELECT COUNT(*) FROM proxies p 
-			WHERE p.subscription_id = s.id 
-				AND p.server != '' 
-				AND p.port > 0 
-				AND (
-					(p.type = 'ss' AND p.method != '' AND p.password != '') OR
-					(p.type = 'vmess' AND p.uuid != '') OR
-					(p.type = 'trojan' AND p.password != '') OR
-					p.type = 'http' OR
-					p.type = 'socks'
-				)
-			) as valid_proxy_count
-		FROM subscriptions s
-	`
+	// 对每个订阅，单独计算有效节点数量
+	for _, sub := range subscriptions {
+		var validCount int64
+		countQuery := models.DB.Model(&models.Proxy{}).
+			Where("subscription_id = ? AND server != '' AND port > 0", sub.ID).
+			Where(
+				models.DB.Where("type = 'ss' AND method != '' AND password != ''").
+					Or("type = 'vmess' AND uuid != ''").
+					Or("type = 'trojan' AND password != ''").
+					Or("type = 'http'").
+					Or("type = 'socks'"),
+			)
 
-	if err := models.DB.Raw(query).Scan(&results).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		if err := countQuery.Count(&validCount).Error; err != nil {
+			// 如果统计失败，默认为0
+			validCount = 0
+		}
+
+		response = append(response, SubscriptionWithCount{
+			Subscription:    sub,
+			ValidProxyCount: int(validCount),
+		})
 	}
 
-	c.JSON(http.StatusOK, results)
+	c.JSON(http.StatusOK, response)
 }
 
 // AddSubscription 添加新订阅
@@ -164,5 +174,37 @@ func RefreshSubscription(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "订阅刷新成功", "subscription": subscription})
+	// 计算有效节点数量
+	var validCount int64
+	countQuery := models.DB.Model(&models.Proxy{}).
+		Where("subscription_id = ? AND server != '' AND port > 0", subscription.ID).
+		Where(
+			models.DB.Where("type = 'ss' AND method != '' AND password != ''").
+				Or("type = 'vmess' AND uuid != ''").
+				Or("type = 'trojan' AND password != ''").
+				Or("type = 'http'").
+				Or("type = 'socks'"),
+		)
+
+	if err := countQuery.Count(&validCount).Error; err != nil {
+		// 如果统计失败，默认为0
+		validCount = 0
+	}
+
+	// 返回刷新成功信息及有效节点数量
+	c.JSON(http.StatusOK, gin.H{
+		"message":           "订阅刷新成功",
+		"subscription":      subscription,
+		"valid_proxy_count": validCount,
+		"total_proxy_count": countTotalProxies(subscription.ID),
+	})
+}
+
+// countTotalProxies 统计指定订阅的总节点数量
+func countTotalProxies(subscriptionID uint) int64 {
+	var count int64
+	models.DB.Model(&models.Proxy{}).
+		Where("subscription_id = ?", subscriptionID).
+		Count(&count)
+	return count
 }
