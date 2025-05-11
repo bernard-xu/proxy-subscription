@@ -9,6 +9,10 @@ set GOARCH=amd64
 if exist .\dist rmdir /s /q .\dist
 mkdir .\dist
 
+:: 清理后端dist目录
+if exist .\backend\dist rmdir /s /q .\backend\dist
+mkdir .\backend\dist
+
 :: Build the frontend
 echo === Build the frontend ===
 cd frontend

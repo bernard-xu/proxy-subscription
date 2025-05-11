@@ -7,6 +7,10 @@ EXPORT GOARCH=amd64
 rm -rf ./dist
 mkdir -p ./dist
 
+
+rm -rf ./backend/dist
+mkdir -p ./backend/dist
+
 echo "=== build frontend ==="
 cd frontend
 npm install
