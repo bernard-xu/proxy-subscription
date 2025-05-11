@@ -1,11 +1,11 @@
 package services
 
 import (
-	"log"
 	"strconv"
 	"time"
 
 	"proxy-subscription/models"
+	"proxy-subscription/utils"
 )
 
 var refreshTicker *time.Ticker
@@ -15,7 +15,7 @@ var stopChan chan struct{}
 func InitScheduler() {
 	stopChan = make(chan struct{})
 	go startScheduler()
-	log.Println("定时任务调度器已启动")
+	utils.Info("定时任务调度器已启动")
 }
 
 // StopScheduler 停止定时任务调度器
@@ -24,7 +24,7 @@ func StopScheduler() {
 		refreshTicker.Stop()
 	}
 	close(stopChan)
-	log.Println("定时任务调度器已停止")
+	utils.Info("定时任务调度器已停止")
 }
 
 // startScheduler 启动定时任务调度器
@@ -91,30 +91,30 @@ func updateScheduler() {
 		}
 	}()
 
-	log.Printf("自动刷新已启用，间隔: %d小时\n", interval)
+	utils.Info("自动刷新已启用，间隔: %d小时", interval)
 }
 
 // refreshAllEnabledSubscriptions 刷新所有启用的订阅
 func refreshAllEnabledSubscriptions() {
-	log.Println("开始自动刷新订阅...")
+	utils.Info("开始自动刷新订阅...")
 
 	// 获取所有启用的订阅
 	var subscriptions []models.Subscription
 	result := models.DB.Where("enabled = ?", true).Find(&subscriptions)
 	if result.Error != nil {
-		log.Printf("获取订阅失败: %v\n", result.Error)
+		utils.Error("获取订阅失败: %v", result.Error)
 		return
 	}
 
 	// 刷新每个订阅
 	for _, subscription := range subscriptions {
-		log.Printf("正在刷新订阅: %s\n", subscription.Name)
+		utils.Info("正在刷新订阅: %s", subscription.Name)
 		if err := RefreshSubscription(&subscription); err != nil {
-			log.Printf("刷新订阅 %s 失败: %v\n", subscription.Name, err)
+			utils.Error("刷新订阅 %s 失败: %v", subscription.Name, err)
 		} else {
-			log.Printf("刷新订阅 %s 成功\n", subscription.Name)
+			utils.Info("刷新订阅 %s 成功", subscription.Name)
 		}
 	}
 
-	log.Println("自动刷新订阅完成")
+	utils.Info("自动刷新订阅完成")
 }

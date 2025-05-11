@@ -2,13 +2,16 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
-	"log"
 	"net/http"
+	"os"
 	"proxy-subscription/api"      // 修改导入路径
 	"proxy-subscription/models"   // 修改导入路径
 	"proxy-subscription/services" // 添加服务导入
+	"proxy-subscription/utils"    // 添加工具包导入
 	"strings"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -17,17 +20,50 @@ import (
 //go:embed dist/*
 var staticFS embed.FS
 
+// customLogger 返回一个精简的Gin日志中间件
+func customLogger() gin.HandlerFunc {
+	return gin.LoggerWithConfig(gin.LoggerConfig{
+		Formatter: func(param gin.LogFormatterParams) string {
+			// 只在非成功状态码或特定请求下记录
+			statusCode := param.StatusCode
+			if statusCode >= 400 || os.Getenv("GIN_LOG") == "1" {
+				return fmt.Sprintf("[GIN] %s | %d | %s | %s | %s\n",
+					param.TimeStamp.Format(time.RFC3339),
+					statusCode,
+					param.Method,
+					param.Path,
+					param.ErrorMessage,
+				)
+			}
+			return ""
+		},
+		Output:    os.Stdout,
+		SkipPaths: []string{"/assets"},
+	})
+}
+
 func main() {
+	// 初始化日志系统
+	utils.InitLogger()
+
+	// 设置Gin为发布模式，减少日志输出
+	gin.SetMode(gin.ReleaseMode)
+
 	// 初始化数据库
 	if err := models.InitDB(); err != nil {
-		log.Fatalf("数据库初始化失败: %v", err)
+		utils.Fatal("数据库初始化失败: %v", err)
 	}
 
 	// 初始化定时任务调度器
 	services.InitScheduler()
 	defer services.StopScheduler()
 
-	r := gin.Default()
+	// 使用gin.New()代替gin.Default()
+	r := gin.New()
+
+	// 添加自定义恢复中间件和精简的日志中间件
+	r.Use(gin.Recovery())
+	r.Use(customLogger())
 
 	// 配置CORS
 	r.Use(cors.New(cors.Config{
@@ -92,8 +128,8 @@ func main() {
 	})
 
 	// 启动服务器
-	log.Println("服务器启动在 http://localhost:8080")
+	utils.Info("服务器启动在 http://localhost:8080")
 	if err := r.Run(":8080"); err != nil {
-		log.Fatalf("服务器启动失败: %v", err)
+		utils.Fatal("服务器启动失败: %v", err)
 	}
 }
