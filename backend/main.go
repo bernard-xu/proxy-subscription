@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"flag"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -43,6 +44,14 @@ func customLogger() gin.HandlerFunc {
 }
 
 func main() {
+	// 定义命令行参数
+	host := flag.String("host", "localhost", "服务器主机地址")
+	port := flag.String("port", "8080", "服务器端口")
+	flag.Parse()
+
+	// 构建服务器地址
+	addr := fmt.Sprintf("%s:%s", *host, *port)
+
 	// 初始化日志系统
 	utils.InitLogger()
 
@@ -128,8 +137,8 @@ func main() {
 	})
 
 	// 启动服务器
-	utils.Info("服务器启动在 http://localhost:8080")
-	if err := r.Run(":8080"); err != nil {
+	utils.Info(fmt.Sprintf("服务器启动在 http://%s", addr))
+	if err := r.Run(addr); err != nil {
 		utils.Fatal("服务器启动失败: %v", err)
 	}
 }

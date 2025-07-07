@@ -71,6 +71,22 @@ chmod +x ./build.sh
 3. 刷新订阅：点击订阅列表中的「刷新」按钮更新节点信息
 4. 导出配置：点击「导出」按钮将配置导出为 NekoRay 可用的格式
 
+### 自定义主机和端口
+
+可以在启动二进制文件时通过命令行参数指定主机地址和端口：
+
+```bash
+# Windows
+proxy-subscription.exe --host 0.0.0.0 --port 8000
+
+# Linux/macOS
+./proxy-subscription --host 0.0.0.0 --port 8000
+```
+
+参数说明：
+- `--host`: 指定服务器监听的主机地址，默认为 `localhost`。使用 `0.0.0.0` 可以监听所有网络接口
+- `--port`: 指定服务器监听的端口，默认为 `8080`
+
 ## API 文档
 
 ### 订阅管理 API

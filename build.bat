@@ -2,7 +2,7 @@
 
 :: 设置构建环境变量
 set CGO_ENABLED=0
-set GOOS=windows
+set GOOS=linux
 set GOARCH=amd64
 
 :: 清理旧的构建产物

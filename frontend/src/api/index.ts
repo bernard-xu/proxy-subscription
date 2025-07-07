@@ -1,6 +1,20 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8080/api';
+// 动态获取API URL，根据当前访问地址构建
+const getApiUrl = () => {
+  const { protocol, hostname } = window.location;
+  const port = import.meta.env.VITE_API_PORT || window.location.port || '8080';
+  
+  // 如果是开发环境，使用默认的localhost:8080
+  if (import.meta.env.DEV) {
+    return 'http://localhost:8080/api';
+  }
+  
+  // 在生产环境中，使用当前访问的域名和协议
+  return `${protocol}//${hostname}${port ? `:${port}` : ''}/api`;
+};
+
+const API_URL = getApiUrl();
 
 // 获取存储的token
 const storedToken = localStorage.getItem('token');
@@ -76,7 +90,9 @@ export const proxyApi = {
 
 // 获取合并订阅链接
 export const getMergedSubscriptionUrl = (format: string = 'base64') => {
-  return `${API_URL}/merged?format=${format}`;
+  // 去掉API_URL末尾的'/api'以获取基础URL
+  const baseUrl = API_URL.replace(/\/api$/, '');
+  return `${baseUrl}/api/merged?format=${format}`;
 };
 
 // 设置相关API
