@@ -8,6 +8,7 @@ import (
 
 	"proxy-subscription/models"
 	"proxy-subscription/services"
+	"proxy-subscription/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -168,18 +169,25 @@ func DeleteSubscription(c *gin.Context) {
 func RefreshSubscription(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
+		utils.Warn("刷新订阅失败: 无效的ID参数: %s", c.Param("id"))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的ID"})
 		return
 	}
 
+	utils.Info("开始刷新订阅 ID=%d", id)
+
 	var subscription models.Subscription
 	if err := models.DB.First(&subscription, id).Error; err != nil {
+		utils.Warn("刷新订阅失败: 订阅不存在 ID=%d, 错误: %v", id, err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "订阅不存在"})
 		return
 	}
 
+	utils.Info("找到订阅 ID=%d, URL=%s, Type=%s", subscription.ID, subscription.URL, subscription.Type)
+
 	// 刷新订阅
 	if err := services.RefreshSubscription(&subscription); err != nil {
+		utils.Error("刷新订阅失败 ID=%d, URL=%s, 错误: %v", subscription.ID, subscription.URL, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -197,6 +205,7 @@ func RefreshSubscription(c *gin.Context) {
 		)
 
 	if err := countQuery.Count(&validCount).Error; err != nil {
+		utils.Warn("统计有效节点数量失败 ID=%d, 错误: %v", subscription.ID, err)
 		// 如果统计失败，默认为0
 		validCount = 0
 	}
@@ -204,6 +213,8 @@ func RefreshSubscription(c *gin.Context) {
 	// 清除缓存
 	services.InvalidateCache()
 	subscription.ValidProxyCount = int(validCount)
+
+	utils.Info("订阅刷新成功 ID=%d, 有效节点数=%d", subscription.ID, validCount)
 
 	// 返回刷新成功信息及有效节点数量
 	c.JSON(http.StatusOK, gin.H{

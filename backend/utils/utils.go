@@ -19,10 +19,37 @@ func EncodeBase64(s string) string {
 	return base64.StdEncoding.EncodeToString([]byte(s))
 }
 
-// DecodeBase64 Base64解码
+// DecodeBase64 Base64解码，支持标准Base64和URL安全的Base64
 func DecodeBase64(s string) ([]byte, error) {
-	bytes, _ := base64.StdEncoding.DecodeString(s)
-	return bytes, nil
+	// 先尝试标准Base64解码
+	bytes, err := base64.StdEncoding.DecodeString(s)
+	if err == nil {
+		return bytes, nil
+	}
+	
+	// 如果标准Base64失败，尝试URL安全的Base64
+	bytes, err = base64.URLEncoding.DecodeString(s)
+	if err == nil {
+		return bytes, nil
+	}
+	
+	// 如果都失败，尝试添加填充后解码
+	s = strings.TrimSpace(s)
+	// 添加必要的填充
+	missingPadding := len(s) % 4
+	if missingPadding != 0 {
+		s += strings.Repeat("=", 4-missingPadding)
+	}
+	
+	// 再次尝试标准Base64
+	bytes, err = base64.StdEncoding.DecodeString(s)
+	if err == nil {
+		return bytes, nil
+	}
+	
+	// 最后尝试URL安全的Base64
+	bytes, err = base64.URLEncoding.DecodeString(s)
+	return bytes, err
 }
 
 // GetString 从map中获取字符串值

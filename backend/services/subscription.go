@@ -1,11 +1,14 @@
 package services
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -19,72 +22,250 @@ import (
 
 // RefreshSubscription 刷新订阅内容
 func RefreshSubscription(subscription *models.Subscription) error {
+	utils.Info("开始获取订阅内容 ID=%d, URL=%s", subscription.ID, subscription.URL)
+
 	// 获取订阅内容
 	content, err := fetchSubscriptionContent(subscription.URL)
 	if err != nil {
-		return err
+		utils.Error("获取订阅内容失败 ID=%d, URL=%s, 错误: %v", subscription.ID, subscription.URL, err)
+		return fmt.Errorf("获取订阅内容失败: %w", err)
 	}
 
+	utils.Info("订阅内容获取成功 ID=%d, 内容长度=%d", subscription.ID, len(content))
+
 	// 解析订阅内容
+	utils.Info("开始解析订阅内容 ID=%d, Type=%s", subscription.ID, subscription.Type)
 	proxies, err := parseSubscriptionContent(content, subscription.Type)
 	if err != nil {
-		return err
+		utils.Error("解析订阅内容失败 ID=%d, Type=%s, 错误: %v", subscription.ID, subscription.Type, err)
+		return fmt.Errorf("解析订阅内容失败: %w", err)
 	}
+
+	utils.Info("订阅内容解析成功 ID=%d, 解析出 %d 个代理节点", subscription.ID, len(proxies))
 
 	// 开始事务
 	tx := models.DB.Begin()
 
 	// 删除旧的代理节点
+	utils.Info("删除旧的代理节点 ID=%d", subscription.ID)
 	if err := tx.Where("subscription_id = ?", subscription.ID).Delete(&models.Proxy{}).Error; err != nil {
 		tx.Rollback()
-		return err
+		utils.Error("删除旧代理节点失败 ID=%d, 错误: %v", subscription.ID, err)
+		return fmt.Errorf("删除旧代理节点失败: %w", err)
 	}
 
 	// 添加新的代理节点
-	for _, proxy := range proxies {
+	utils.Info("开始添加新的代理节点 ID=%d, 数量=%d", subscription.ID, len(proxies))
+	for i, proxy := range proxies {
 		proxy.SubscriptionID = subscription.ID
 		if err := tx.Create(&proxy).Error; err != nil {
 			tx.Rollback()
-			return err
+			utils.Error("添加代理节点失败 ID=%d, 节点索引=%d, 节点名称=%s, 错误: %v", subscription.ID, i, proxy.Name, err)
+			return fmt.Errorf("添加代理节点失败: %w", err)
 		}
 	}
+
+	utils.Info("代理节点添加成功 ID=%d, 成功添加 %d 个节点", subscription.ID, len(proxies))
 
 	// 更新订阅的最后更新时间
 	subscription.LastUpdated = time.Now()
 	if err := tx.Save(subscription).Error; err != nil {
 		tx.Rollback()
-		return err
+		utils.Error("更新订阅最后更新时间失败 ID=%d, 错误: %v", subscription.ID, err)
+		return fmt.Errorf("更新订阅最后更新时间失败: %w", err)
 	}
 
 	// 提交事务
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		utils.Error("提交事务失败 ID=%d, 错误: %v", subscription.ID, err)
+		return fmt.Errorf("提交事务失败: %w", err)
+	}
+
+	utils.Info("订阅刷新完成 ID=%d, 成功刷新 %d 个代理节点", subscription.ID, len(proxies))
+	return nil
 }
 
 // fetchSubscriptionContent 获取订阅内容
-func fetchSubscriptionContent(url string) (string, error) {
-	resp, err := http.Get(url)
+func fetchSubscriptionContent(subscriptionURL string) (string, error) {
+	utils.Info("开始HTTP请求获取订阅内容 URL=%s", subscriptionURL)
+
+	// 创建HTTP请求
+	req, err := http.NewRequest("GET", subscriptionURL, nil)
 	if err != nil {
-		return "", err
+		utils.Error("创建HTTP请求失败 URL=%s, 错误: %v", subscriptionURL, err)
+		return "", fmt.Errorf("创建HTTP请求失败: %w", err)
+	}
+
+	// 设置请求头，模拟真实浏览器请求
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("Pragma", "no-cache")
+
+	// 如果URL包含域名，设置Referer
+	if parsedURL, err := url.Parse(subscriptionURL); err == nil {
+		req.Header.Set("Referer", fmt.Sprintf("%s://%s/", parsedURL.Scheme, parsedURL.Host))
+	}
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		// 不自动跟随重定向，避免丢失请求头
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// 在重定向时保持请求头
+			if len(via) >= 10 {
+				return fmt.Errorf("重定向次数过多")
+			}
+			// 复制原始请求的请求头
+			maps.Copy(req.Header, via[0].Header)
+			return nil
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		utils.Error("HTTP请求失败 URL=%s, 错误: %v", subscriptionURL, err)
+		return "", fmt.Errorf("HTTP请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
+	utils.Info("HTTP请求成功 URL=%s, 状态码=%d", subscriptionURL, resp.StatusCode)
+
 	if resp.StatusCode != http.StatusOK {
-		return "", errors.New("获取订阅内容失败，HTTP状态码: " + resp.Status)
+		// 读取响应体以获取更多错误信息
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyStr := string(bodyBytes)
+		if len(bodyStr) > 200 {
+			bodyStr = bodyStr[:200] + "..."
+		}
+
+		// 根据不同的状态码提供更友好的错误信息
+		var errorMsg string
+		switch resp.StatusCode {
+		case http.StatusUnauthorized:
+			errorMsg = "订阅认证失败，token可能已过期或无效，请检查订阅URL中的token参数"
+		case http.StatusForbidden:
+			errorMsg = "订阅访问被拒绝，服务器可能检测到非浏览器请求，请检查订阅URL是否正确"
+		case http.StatusNotFound:
+			errorMsg = "订阅不存在，请检查订阅URL是否正确"
+		case http.StatusTooManyRequests:
+			errorMsg = "请求过于频繁，请稍后再试"
+		case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			errorMsg = fmt.Sprintf("订阅服务器错误 (%d)，请稍后重试", resp.StatusCode)
+		default:
+			errorMsg = fmt.Sprintf("获取订阅内容失败，HTTP状态码: %d %s", resp.StatusCode, resp.Status)
+		}
+
+		utils.Error("HTTP状态码异常 URL=%s, 状态码=%d, 状态=%s, 响应体: %s", subscriptionURL, resp.StatusCode, resp.Status, bodyStr)
+		return "", fmt.Errorf(errorMsg)
 	}
 
 	body, err := io.ReadAll(resp.Body)
+
 	if err != nil {
-		return "", err
+		utils.Error("读取响应体失败 URL=%s, 错误: %v", subscriptionURL, err)
+		return "", fmt.Errorf("读取响应体失败: %w", err)
 	}
 
+	// 检查响应是否被压缩，如果是则解压
+	contentEncoding := resp.Header.Get("Content-Encoding")
+	if contentEncoding == "gzip" || contentEncoding == "x-gzip" {
+		utils.Info("检测到gzip压缩响应，开始解压，压缩数据长度=%d", len(body))
+		reader, err := gzip.NewReader(bytes.NewReader(body))
+		if err != nil {
+			utils.Warn("创建gzip读取器失败: %v，使用原始内容", err)
+		} else {
+			decompressed, err := io.ReadAll(reader)
+			reader.Close()
+			if err != nil {
+				utils.Warn("gzip解压失败: %v，使用原始内容", err)
+			} else {
+				utils.Info("gzip解压成功，解压后长度=%d", len(decompressed))
+				body = decompressed
+			}
+		}
+	}
+
+	utils.Info("订阅内容获取成功 URL=%s, 内容长度=%d", subscriptionURL, len(body))
 	return string(body), nil
 }
 
 // parseSubscriptionContent 解析订阅内容
 func parseSubscriptionContent(content string, subType string) ([]models.Proxy, error) {
-	// 解码Base64内容
-	decoded, _ := utils.DecodeBase64(content)
-	content = string(decoded)
+	// 尝试解码Base64内容
+	decoded, err := utils.DecodeBase64(content)
+	if err == nil && len(decoded) > 0 {
+		// Base64解码成功，检查是否需要解压
+		var finalContent []byte = decoded
+
+		// 检查是否是gzip压缩的数据（gzip文件头：0x1f 0x8b）
+		if len(decoded) >= 2 && decoded[0] == 0x1f && decoded[1] == 0x8b {
+			utils.Info("检测到gzip压缩数据，开始解压，压缩数据长度=%d", len(decoded))
+			reader, err := gzip.NewReader(bytes.NewReader(decoded))
+			if err == nil {
+				decompressed, err := io.ReadAll(reader)
+				reader.Close()
+				if err == nil && len(decompressed) > 0 {
+					utils.Info("gzip解压成功，解压后长度=%d", len(decompressed))
+					finalContent = decompressed
+				} else {
+					utils.Warn("gzip解压失败: %v，使用原始解码内容", err)
+				}
+			} else {
+				utils.Warn("创建gzip读取器失败: %v，使用原始解码内容", err)
+			}
+		}
+
+		// 尝试将解码后的内容转换为字符串
+		decodedStr := string(finalContent)
+
+		// 检查解码后的内容是否看起来像有效的代理链接或配置
+		// 检查是否包含可打印字符（至少70%是可打印字符，降低阈值以处理更多情况）
+		printableCount := 0
+		for _, b := range finalContent {
+			if b >= 32 && b < 127 || b == 9 || b == 10 || b == 13 {
+				printableCount++
+			}
+		}
+		printableRatio := float64(printableCount) / float64(len(finalContent))
+
+		utils.Info("Base64解码后内容分析: 长度=%d, 可打印字符比例=%.2f%%, 前100字符: %s",
+			len(decodedStr), printableRatio*100, getPreview(decodedStr, 100))
+
+		// 如果可打印字符比例足够高，或者包含明显的代理链接标识，使用解码后的内容
+		if printableRatio > 0.7 || strings.Contains(decodedStr, "://") ||
+			strings.HasPrefix(strings.TrimSpace(decodedStr), "{") ||
+			strings.HasPrefix(strings.TrimSpace(decodedStr), "[") {
+			utils.Info("使用Base64解码后的内容进行解析")
+			content = decodedStr
+		} else {
+			// 解码后的内容看起来不像有效格式
+			utils.Warn("Base64解码后的内容格式异常（可打印字符比例=%.2f%%），尝试其他解析方式", printableRatio*100)
+			// 如果解压后的内容可打印字符比例很低，可能是每行都是Base64编码的链接
+			// 尝试逐行Base64解码（使用字节数组，因为可能是二进制数据）
+			utils.Info("尝试对解压后的内容进行逐行Base64解码（字节模式）")
+			if proxies, err := parseLineByLineBase64FromBytes(finalContent, subType); err == nil && len(proxies) > 0 {
+				return proxies, nil
+			}
+			// 尝试字符串模式的逐行Base64解码
+			utils.Info("尝试对解压后的内容进行逐行Base64解码（字符串模式）")
+			if proxies, err := parseLineByLineBase64(decodedStr, subType); err == nil && len(proxies) > 0 {
+				return proxies, nil
+			}
+			// 如果原始内容看起来像Base64，尝试逐行Base64解码
+			if isBase64Like(content) {
+				utils.Info("原始内容看起来像Base64，尝试逐行Base64解码")
+				return parseLineByLineBase64(content, subType)
+			}
+			// 否则尝试直接解析原始内容（可能是纯文本格式）
+			utils.Info("尝试使用原始内容进行解析")
+		}
+	} else {
+		// Base64解码失败，可能是纯文本格式，使用原始内容
+		utils.Info("订阅内容Base64解码失败，使用原始内容，前100字符: %s", getPreview(content, 100))
+	}
 
 	// 根据订阅类型解析内容
 	switch subType {
@@ -112,6 +293,187 @@ func parseSubscriptionContent(content string, subType string) ([]models.Proxy, e
 		// 尝试自动检测类型
 		return autoDetectAndParse(content)
 	}
+}
+
+// isBase64Like 检查字符串是否看起来像Base64编码
+func isBase64Like(s string) bool {
+	if len(s) < 4 {
+		return false
+	}
+	// Base64只包含A-Z, a-z, 0-9, +, /, = 和可能的空格/换行
+	validChars := 0
+	for _, r := range s {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
+			(r >= '0' && r <= '9') || r == '+' || r == '/' || r == '=' ||
+			r == ' ' || r == '\n' || r == '\r' || r == '\t' {
+			validChars++
+		}
+	}
+	return float64(validChars)/float64(len(s)) > 0.9
+}
+
+// parseLineByLineBase64FromBytes 从字节数组逐行Base64解码并解析
+func parseLineByLineBase64FromBytes(data []byte, subType string) ([]models.Proxy, error) {
+	utils.Info("尝试从字节数组逐行Base64解码，数据长度=%d", len(data))
+	var allProxies []models.Proxy
+
+	// 按换行符分割（支持\n和\r\n）
+	lines := bytes.Split(data, []byte("\n"))
+	if len(lines) == 1 {
+		// 如果没有\n，尝试\r\n
+		lines = bytes.Split(data, []byte("\r\n"))
+	}
+
+	utils.Info("分割后共 %d 行", len(lines))
+
+	for i, lineBytes := range lines {
+		// 去除首尾空白字符
+		lineBytes = bytes.TrimSpace(lineBytes)
+		if len(lineBytes) == 0 {
+			continue
+		}
+
+		// 尝试将字节数组转换为字符串（可能是Base64编码的字符串）
+		lineStr := string(lineBytes)
+
+		// 检查这一行是否看起来像Base64（至少包含Base64字符）
+		base64Like := false
+		base64CharCount := 0
+		for _, b := range lineBytes {
+			if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') ||
+				(b >= '0' && b <= '9') || b == '+' || b == '/' || b == '=' {
+				base64CharCount++
+			}
+		}
+		base64Ratio := 0.0
+		if len(lineBytes) > 0 {
+			base64Ratio = float64(base64CharCount) / float64(len(lineBytes))
+			if base64Ratio > 0.8 {
+				base64Like = true
+			}
+		}
+
+		if !base64Like {
+			// 如果这一行不像Base64，跳过
+			if i < 3 {
+				previewLen := 50
+				if len(lineBytes) < previewLen {
+					previewLen = len(lineBytes)
+				}
+				utils.Info("行 %d 不像Base64编码，跳过，前%d字节(hex): %x", i+1, previewLen, lineBytes[:previewLen])
+			}
+			continue
+		}
+
+		// 尝试Base64解码这一行
+		decoded, err := utils.DecodeBase64(lineStr)
+		if err != nil {
+			// 如果这一行不是Base64，跳过
+			if i < 3 {
+				utils.Info("行 %d Base64解码失败: %v", i+1, err)
+			}
+			continue
+		}
+
+		// 检查解码后是否是gzip压缩
+		if len(decoded) >= 2 && decoded[0] == 0x1f && decoded[1] == 0x8b {
+			reader, err := gzip.NewReader(bytes.NewReader(decoded))
+			if err == nil {
+				decompressed, err := io.ReadAll(reader)
+				reader.Close()
+				if err == nil {
+					decoded = decompressed
+				}
+			}
+		}
+
+		decodedStr := string(decoded)
+		utils.Info("行 %d Base64解码成功，解码后长度=%d, 前100字符: %s", i+1, len(decodedStr), getPreview(decodedStr, 100))
+
+		// 尝试解析解码后的内容
+		proxies, err := autoDetectAndParse(decodedStr)
+		if err == nil && len(proxies) > 0 {
+			allProxies = append(allProxies, proxies...)
+		} else if err != nil {
+			utils.Warn("行 %d Base64解码后解析失败: %v", i+1, err)
+		}
+	}
+
+	if len(allProxies) > 0 {
+		utils.Info("从字节数组逐行Base64解码成功，解析出 %d 个代理节点", len(allProxies))
+		return allProxies, nil
+	}
+
+	return nil, fmt.Errorf("从字节数组逐行Base64解码未找到代理")
+}
+
+// parseLineByLineBase64 逐行Base64解码并解析
+func parseLineByLineBase64(content string, subType string) ([]models.Proxy, error) {
+	utils.Info("尝试逐行Base64解码（字符串模式）")
+	var allProxies []models.Proxy
+	lines := strings.Split(content, "\n")
+
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// 尝试Base64解码这一行
+		decoded, err := utils.DecodeBase64(line)
+		if err != nil {
+			// 如果这一行不是Base64，可能是纯文本链接，跳过
+			continue
+		}
+
+		// 检查解码后是否是gzip压缩
+		if len(decoded) >= 2 && decoded[0] == 0x1f && decoded[1] == 0x8b {
+			reader, err := gzip.NewReader(bytes.NewReader(decoded))
+			if err == nil {
+				decompressed, err := io.ReadAll(reader)
+				reader.Close()
+				if err == nil {
+					decoded = decompressed
+				}
+			}
+		}
+
+		decodedStr := string(decoded)
+		utils.Info("行 %d Base64解码成功，解码后长度=%d, 前100字符: %s", i+1, len(decodedStr), getPreview(decodedStr, 100))
+
+		// 尝试解析解码后的内容
+		proxies, err := autoDetectAndParse(decodedStr)
+		if err == nil && len(proxies) > 0 {
+			allProxies = append(allProxies, proxies...)
+		} else if err != nil {
+			utils.Warn("行 %d Base64解码后解析失败: %v", i+1, err)
+		}
+	}
+
+	if len(allProxies) > 0 {
+		utils.Info("逐行Base64解码成功，解析出 %d 个代理节点", len(allProxies))
+		return allProxies, nil
+	}
+
+	// 如果逐行解码失败，尝试整体解码后按换行分割
+	utils.Info("逐行Base64解码未找到代理，尝试整体解码")
+	return autoDetectAndParse(content)
+}
+
+// getPreview 获取内容预览，用于日志
+func getPreview(content string, maxLen int) string {
+	if len(content) <= maxLen {
+		return content
+	}
+	return content[:maxLen] + "..."
+}
+
+// getPreviewBytes 获取字节数组的十六进制预览，用于日志
+func getPreviewBytes(data []byte, maxLen int) string {
+	if len(data) <= maxLen {
+		return fmt.Sprintf("%x", data)
+	}
+	return fmt.Sprintf("%x...", data[:maxLen])
 }
 
 // parseV2raySubscription 解析V2Ray订阅
@@ -188,31 +550,79 @@ func parseTrojanSubscription(content string) ([]models.Proxy, error) {
 
 // autoDetectAndParse 自动检测并解析订阅类型
 func autoDetectAndParse(content string) ([]models.Proxy, error) {
+	utils.Info("开始自动检测订阅类型，内容长度=%d", len(content))
+
 	// 检查是否为JSON格式
-	if len(content) > 0 && (strings.TrimSpace(content)[0] == '{' || strings.TrimSpace(content)[0] == '[') {
+	trimmed := strings.TrimSpace(content)
+	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
+		utils.Info("检测到JSON格式订阅")
 		return parseJSONSubscription(content)
 	}
 
 	// 检查是否为Clash配置
 	if strings.Contains(content, "proxies:") && (strings.Contains(content, "yaml") || strings.Contains(content, "rules:")) {
+		utils.Info("检测到Clash格式订阅")
 		return parseClashSubscription(content)
 	}
 
 	// 检查是否为Surge配置
 	if strings.Contains(content, "[Proxy]") || strings.Contains(content, "[Proxy Group]") {
+		utils.Info("检测到Surge格式订阅")
 		return parseSurgeSubscription(content)
 	}
 
 	// 检查是否为Quantumult配置
 	if strings.Contains(content, "shadowsocks=") || strings.Contains(content, "vmess=") || strings.Contains(content, "SERVER,") {
+		utils.Info("检测到Quantumult格式订阅")
 		return parseQuantumultSubscription(content)
 	}
 
+	// 检查内容是否是二进制数据（包含大量不可打印字符）
+	contentBytes := []byte(content)
+	printableCount := 0
+	for _, b := range contentBytes {
+		if b >= 32 && b < 127 || b == 9 || b == 10 || b == 13 {
+			printableCount++
+		}
+	}
+	printableRatio := float64(printableCount) / float64(len(contentBytes))
+
+	// 如果可打印字符比例很低，可能是二进制数据，尝试逐行Base64解码
+	if len(contentBytes) > 0 && printableRatio < 0.5 {
+		utils.Info("检测到内容可能是二进制数据（可打印字符比例=%.2f%%），尝试逐行Base64解码", printableRatio*100)
+		if proxies, err := parseLineByLineBase64FromBytes(contentBytes, ""); err == nil && len(proxies) > 0 {
+			return proxies, nil
+		}
+		utils.Warn("逐行Base64解码未找到代理，继续尝试其他解析方式")
+	}
+
 	// 逐行解析URI
+	utils.Info("尝试逐行解析URI格式订阅")
 	var proxies []models.Proxy
 	lines := strings.Split(content, "\n")
 
-	for _, line := range lines {
+	utils.Info("内容共 %d 行，开始解析", len(lines))
+
+	// 打印前5行的实际内容用于调试
+	nonEmptyLines := 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			nonEmptyLines++
+			if nonEmptyLines <= 5 {
+				utils.Info("第 %d 行内容预览（前100字符）: %s", i+1, getPreview(trimmed, 100))
+			}
+		}
+	}
+	utils.Info("非空行总数: %d", nonEmptyLines)
+
+	vmessCount := 0
+	ssCount := 0
+	trojanCount := 0
+	otherCount := 0
+	errorCount := 0
+
+	for i, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -223,18 +633,83 @@ func autoDetectAndParse(content string) ([]models.Proxy, error) {
 
 		switch {
 		case strings.HasPrefix(line, "vmess://"):
+			vmessCount++
 			proxy, err = parseVmessLink(line)
+			if err != nil {
+				utils.Warn("解析vmess链接失败 行=%d, 错误: %v, 链接前50字符: %s", i+1, err, getPreview(line, 50))
+				errorCount++
+			}
 		case strings.HasPrefix(line, "ss://"):
+			ssCount++
 			proxy, err = parseSSLink(line)
+			if err != nil {
+				utils.Warn("解析ss链接失败 行=%d, 错误: %v, 链接前50字符: %s", i+1, err, getPreview(line, 50))
+				errorCount++
+			}
 		case strings.HasPrefix(line, "trojan://"):
+			trojanCount++
 			proxy, err = parseTrojanLink(line)
+			if err != nil {
+				utils.Warn("解析trojan链接失败 行=%d, 错误: %v, 链接前50字符: %s", i+1, err, getPreview(line, 50))
+				errorCount++
+			}
 		case strings.HasPrefix(line, "ssr://"):
 			proxy, err = parseSSRLink(line)
+			if err != nil {
+				utils.Warn("解析ssr链接失败 行=%d, 错误: %v", i+1, err)
+				errorCount++
+			}
 		case strings.HasPrefix(line, "http://") || strings.HasPrefix(line, "https://"):
 			proxy, err = parseHTTPLink(line)
+			if err != nil {
+				utils.Warn("解析http链接失败 行=%d, 错误: %v", i+1, err)
+				errorCount++
+			}
 		case strings.HasPrefix(line, "socks://") || strings.HasPrefix(line, "socks5://"):
 			proxy, err = parseSOCKSLink(line)
+			if err != nil {
+				utils.Warn("解析socks链接失败 行=%d, 错误: %v", i+1, err)
+				errorCount++
+			}
 		default:
+			otherCount++
+			// 记录前10行不支持的内容，用于调试
+			if otherCount <= 10 {
+				utils.Info("跳过不支持的行 %d, 内容前100字符: %s", i+1, getPreview(line, 100))
+				// 尝试检查是否是Base64编码的链接
+				if decoded, err := utils.DecodeBase64(line); err == nil && len(decoded) > 0 {
+					decodedStr := string(decoded)
+					utils.Info("  该行可能是Base64编码，解码后前100字符: %s", getPreview(decodedStr, 100))
+					// 如果解码后看起来像代理链接，尝试解析
+					if strings.HasPrefix(decodedStr, "vmess://") ||
+						strings.HasPrefix(decodedStr, "ss://") ||
+						strings.HasPrefix(decodedStr, "trojan://") {
+						utils.Info("  检测到解码后是代理链接，尝试解析")
+						var decodedProxy models.Proxy
+						var decodedErr error
+						switch {
+						case strings.HasPrefix(decodedStr, "vmess://"):
+							vmessCount++
+							decodedProxy, decodedErr = parseVmessLink(decodedStr)
+						case strings.HasPrefix(decodedStr, "ss://"):
+							ssCount++
+							decodedProxy, decodedErr = parseSSLink(decodedStr)
+						case strings.HasPrefix(decodedStr, "trojan://"):
+							trojanCount++
+							decodedProxy, decodedErr = parseTrojanLink(decodedStr)
+						}
+						if decodedErr == nil {
+							proxies = append(proxies, decodedProxy)
+							otherCount-- // 修正计数
+							utils.Info("  成功解析Base64编码的代理链接")
+							continue
+						} else {
+							utils.Warn("  解析Base64解码后的链接失败: %v", decodedErr)
+							errorCount++
+						}
+					}
+				}
+			}
 			continue // 跳过不支持的链接
 		}
 
@@ -242,6 +717,9 @@ func autoDetectAndParse(content string) ([]models.Proxy, error) {
 			proxies = append(proxies, proxy)
 		}
 	}
+
+	utils.Info("解析完成: vmess=%d, ss=%d, trojan=%d, 其他=%d, 错误=%d, 成功解析=%d",
+		vmessCount, ssCount, trojanCount, otherCount, errorCount, len(proxies))
 
 	return proxies, nil
 }

@@ -38,6 +38,69 @@ api.interceptors.request.use(config => {
   return config;
 });
 
+// 响应拦截器，统一处理错误信息
+api.interceptors.response.use(
+  (response) => {
+    // 成功响应直接返回
+    return response;
+  },
+  (error) => {
+    // 处理错误响应
+    if (error.response) {
+      // 服务器返回了错误响应
+      const { status, data } = error.response;
+      
+      // 从响应中提取错误信息
+      let errorMessage = '操作失败';
+      
+      if (data) {
+        // 优先使用 error 字段
+        if (data.error) {
+          errorMessage = data.error;
+        } else if (data.message) {
+          errorMessage = data.message;
+        } else if (typeof data === 'string') {
+          errorMessage = data;
+        }
+      }
+      
+      // 根据状态码提供默认错误信息
+      if (!data || (!data.error && !data.message)) {
+        switch (status) {
+          case 400:
+            errorMessage = '请求参数错误';
+            break;
+          case 401:
+            errorMessage = '未授权，请重新登录';
+            break;
+          case 403:
+            errorMessage = '访问被拒绝';
+            break;
+          case 404:
+            errorMessage = '资源不存在';
+            break;
+          case 500:
+            errorMessage = '服务器内部错误';
+            break;
+          default:
+            errorMessage = `请求失败 (${status})`;
+        }
+      }
+      
+      // 将错误信息设置到 error.message，方便前端使用
+      error.message = errorMessage;
+    } else if (error.request) {
+      // 请求已发出但没有收到响应
+      error.message = '网络错误，请检查网络连接';
+    } else {
+      // 请求配置出错
+      error.message = error.message || '请求配置错误';
+    }
+    
+    return Promise.reject(error);
+  }
+);
+
 export interface Subscription {
   id?: number;
   name: string;
