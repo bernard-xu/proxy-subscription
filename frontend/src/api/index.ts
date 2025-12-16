@@ -4,12 +4,12 @@ import axios from 'axios';
 const getApiUrl = () => {
   const { protocol, hostname } = window.location;
   const port = import.meta.env.VITE_API_PORT || window.location.port || '8080';
-  
+
   // 如果是开发环境，使用默认的localhost:8080
   if (import.meta.env.DEV) {
     return 'http://localhost:8080/api';
   }
-  
+
   // 在生产环境中，使用当前访问的域名和协议
   return `${protocol}//${hostname}${port ? `:${port}` : ''}/api`;
 };
@@ -49,10 +49,10 @@ api.interceptors.response.use(
     if (error.response) {
       // 服务器返回了错误响应
       const { status, data } = error.response;
-      
+
       // 从响应中提取错误信息
       let errorMessage = '操作失败';
-      
+
       if (data) {
         // 优先使用 error 字段
         if (data.error) {
@@ -63,7 +63,7 @@ api.interceptors.response.use(
           errorMessage = data;
         }
       }
-      
+
       // 根据状态码提供默认错误信息
       if (!data || (!data.error && !data.message)) {
         switch (status) {
@@ -86,7 +86,7 @@ api.interceptors.response.use(
             errorMessage = `请求失败 (${status})`;
         }
       }
-      
+
       // 将错误信息设置到 error.message，方便前端使用
       error.message = errorMessage;
     } else if (error.request) {
@@ -96,7 +96,7 @@ api.interceptors.response.use(
       // 请求配置出错
       error.message = error.message || '请求配置错误';
     }
-    
+
     return Promise.reject(error);
   }
 );
@@ -117,6 +117,7 @@ export interface Proxy {
   id?: number;
   subscription_id: number;
   name: string;
+  display_name?: string;
   type: string;
   server: string;
   port: number;
@@ -130,6 +131,7 @@ export interface Proxy {
   sni?: string;
   alpn?: string;
   rawConfig?: string;
+  subscription_name?: string;
 }
 
 // 订阅相关API

@@ -25,7 +25,11 @@
         <el-empty v-else-if="!filteredProxies.length" description="暂无节点" />
 
         <el-table v-else :data="filteredProxies" style="width: 100%" border stripe>
-            <el-table-column prop="name" label="名称" min-width="200" show-overflow-tooltip />
+            <el-table-column label="名称" min-width="200" show-overflow-tooltip>
+                <template #default="scope">
+                    {{ scope.row.display_name || scope.row.name }}
+                </template>
+            </el-table-column>
             <el-table-column prop="type" label="类型" width="100">
                 <template #default="scope">
                     <el-tag :type="getProxyTypeTag(scope.row.type)">
@@ -54,7 +58,12 @@
         <el-dialog v-model="detailDialogVisible" title="节点详情" width="600px">
             <div v-if="selectedProxy">
                 <el-descriptions :column="1" border>
-                    <el-descriptions-item label="名称">{{ selectedProxy.name }}</el-descriptions-item>
+                    <el-descriptions-item label="名称">
+                        {{ selectedProxy.display_name || selectedProxy.name }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="原始名称" v-if="selectedProxy.display_name">
+                        {{ selectedProxy.name }}
+                    </el-descriptions-item>
                     <el-descriptions-item label="类型">{{ selectedProxy.type.toUpperCase() }}</el-descriptions-item>
                     <el-descriptions-item label="服务器">{{ selectedProxy.server }}</el-descriptions-item>
                     <el-descriptions-item label="端口">{{ selectedProxy.port }}</el-descriptions-item>
@@ -135,10 +144,14 @@ const filteredProxies = computed(() => {
     // 按搜索关键词过滤
     if (searchQuery.value) {
         const query = searchQuery.value.toLowerCase();
-        result = result.filter(proxy =>
-            proxy.name.toLowerCase().includes(query) ||
-            proxy.server.toLowerCase().includes(query)
-        );
+        result = result.filter(proxy => {
+            const displayName = (proxy.display_name || proxy.name || '').toLowerCase();
+            const name = (proxy.name || '').toLowerCase();
+            const server = (proxy.server || '').toLowerCase();
+            return displayName.includes(query) ||
+                name.includes(query) ||
+                server.includes(query);
+        });
     }
 
     return result;

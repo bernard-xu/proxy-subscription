@@ -35,6 +35,11 @@ func GetProxies(c *gin.Context) {
 		return
 	}
 
+	// 为每个代理设置显示名称
+	for i := range results {
+		results[i].DisplayName = results[i].GetDisplayName()
+	}
+
 	c.JSON(http.StatusOK, results)
 }
 
@@ -51,6 +56,9 @@ func GetProxy(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "代理节点不存在"})
 		return
 	}
+
+	// 设置显示名称
+	proxy.DisplayName = proxy.GetDisplayName()
 
 	c.JSON(http.StatusOK, proxy)
 }
