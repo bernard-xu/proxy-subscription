@@ -1,6 +1,9 @@
 package models
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,6 +24,9 @@ type Subscription struct {
 type Proxy struct {
 	BaseModel
 	SubscriptionID uint   `json:"subscription_id" gorm:"not null"`
+	IsCustom       bool   `json:"is_custom" gorm:"default:false;index"`
+	ManualOverride bool   `json:"manual_override" gorm:"default:false;index"`
+	SourceKey      string `json:"source_key" gorm:"index"`
 	Name           string `json:"name" gorm:"not null"`
 	Type           string `json:"type" gorm:"not null"` // v2ray, ss, trojan等
 	Server         string `json:"server" gorm:"not null"`
@@ -39,6 +45,30 @@ type Proxy struct {
 	AllowInsecure  bool   `json:"allow_insecure"`             // 是否允许不安全连接（跳过证书验证）
 	RawConfig      string `json:"rawConfig" gorm:"type:text"` // 存储原始配置
 	DisplayName    string `json:"display_name" gorm:"-"`      // 格式化后的显示名称，不存储到数据库
+}
+
+// BuildSourceKey returns a stable identity for a proxy parsed from a subscription.
+func (p *Proxy) BuildSourceKey() string {
+	rawConfig := strings.TrimSpace(p.RawConfig)
+	if rawConfig != "" {
+		return "raw:" + hashSourceKey(rawConfig)
+	}
+
+	parts := []string{
+		strings.ToLower(strings.TrimSpace(p.Type)),
+		strings.ToLower(strings.TrimSpace(p.Name)),
+		strings.ToLower(strings.TrimSpace(p.Server)),
+		strconv.Itoa(p.Port),
+		strings.TrimSpace(p.UUID),
+		strings.TrimSpace(p.Password),
+		strings.ToLower(strings.TrimSpace(p.Method)),
+	}
+	return "fields:" + hashSourceKey(strings.Join(parts, "\x00"))
+}
+
+func hashSourceKey(value string) string {
+	hash := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(hash[:])
 }
 
 // GetDisplayName 根据名称获取格式化的显示名称
@@ -495,7 +525,7 @@ func (p *Proxy) GetDisplayName() string {
 		// 法属、英属、荷属地区别名
 		"法属": "RE", "French Overseas": "RE", "French Territory": "RE",
 		"英属": "VG", "British Overseas": "VG", "British Territory": "VG",
-		"荷属": "AW", "Dutch Caribbean": "AW", "Dutch Territory": "AW",
+		"Dutch Caribbean": "AW", "Dutch Territory": "AW",
 		// 群岛和地区别名
 		"Caribbean": "BS", "加勒比": "BS", "Caribbean Islands": "BS",
 		"Pacific": "FJ", "太平洋": "FJ", "Pacific Islands": "FJ",

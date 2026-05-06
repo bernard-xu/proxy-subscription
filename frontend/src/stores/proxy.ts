@@ -53,5 +53,52 @@ export const useProxyStore = defineStore('proxy', {
         this.loading = false;
       }
     },
+
+    async addProxy(proxy: Proxy) {
+      this.error = null;
+
+      try {
+        const response = await proxyApi.create(proxy);
+        this.proxies.push(response.data);
+        return response.data;
+      } catch (error: any) {
+        this.error = error.message || '添加自定义节点失败';
+        console.error('添加自定义节点失败:', error);
+        throw error;
+      }
+    },
+
+    async updateProxy(id: number, proxy: Proxy) {
+      this.error = null;
+
+      try {
+        const response = await proxyApi.update(id, proxy);
+        const index = this.proxies.findIndex(item => item.id === id);
+        if (index !== -1) {
+          this.proxies[index] = response.data;
+        }
+        return response.data;
+      } catch (error: any) {
+        this.error = error.message || '更新自定义节点失败';
+        console.error('更新自定义节点失败:', error);
+        throw error;
+      }
+    },
+
+    async deleteProxy(id: number) {
+      this.error = null;
+
+      try {
+        await proxyApi.delete(id);
+        const index = this.proxies.findIndex(proxy => proxy.id === id);
+        if (index !== -1) {
+          this.proxies.splice(index, 1);
+        }
+      } catch (error: any) {
+        this.error = error.message || '删除自定义节点失败';
+        console.error('删除自定义节点失败:', error);
+        throw error;
+      }
+    },
   },
 });

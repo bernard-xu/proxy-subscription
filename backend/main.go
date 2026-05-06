@@ -109,7 +109,10 @@ func main() {
 
 			// 代理节点相关API
 			authGroup.GET("/proxies", api.GetProxies)
+			authGroup.POST("/proxies", api.AddCustomProxy)
 			authGroup.GET("/proxies/:id", api.GetProxy)
+			authGroup.PUT("/proxies/:id", api.UpdateProxy)
+			authGroup.DELETE("/proxies/:id", api.DeleteCustomProxy)
 
 			// 设置相关API
 			authGroup.GET("/settings", api.GetSettings)

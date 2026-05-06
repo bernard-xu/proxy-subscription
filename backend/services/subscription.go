@@ -46,9 +46,31 @@ func RefreshSubscription(subscription *models.Subscription) error {
 	// 开始事务
 	tx := models.DB.Begin()
 
+	var manualProxies []models.Proxy
+	if err := tx.Where("subscription_id = ? AND manual_override = ?", subscription.ID, true).Find(&manualProxies).Error; err != nil {
+		tx.Rollback()
+		utils.Error("读取手动修改节点失败 ID=%d, 错误: %v", subscription.ID, err)
+		return fmt.Errorf("读取手动修改节点失败: %w", err)
+	}
+
+	manualSourceKeys := make(map[string]struct{}, len(manualProxies))
+	for i := range manualProxies {
+		sourceKey := manualProxies[i].SourceKey
+		if sourceKey == "" {
+			sourceKey = manualProxies[i].BuildSourceKey()
+			manualProxies[i].SourceKey = sourceKey
+			if err := tx.Model(&manualProxies[i]).Update("source_key", sourceKey).Error; err != nil {
+				tx.Rollback()
+				utils.Error("更新手动修改节点标识失败 ID=%d, 错误: %v", subscription.ID, err)
+				return fmt.Errorf("更新手动修改节点标识失败: %w", err)
+			}
+		}
+		manualSourceKeys[sourceKey] = struct{}{}
+	}
+
 	// 删除旧的代理节点
 	utils.Info("删除旧的代理节点 ID=%d", subscription.ID)
-	if err := tx.Where("subscription_id = ?", subscription.ID).Delete(&models.Proxy{}).Error; err != nil {
+	if err := tx.Where("subscription_id = ? AND (manual_override = ? OR manual_override IS NULL)", subscription.ID, false).Delete(&models.Proxy{}).Error; err != nil {
 		tx.Rollback()
 		utils.Error("删除旧代理节点失败 ID=%d, 错误: %v", subscription.ID, err)
 		return fmt.Errorf("删除旧代理节点失败: %w", err)
@@ -56,8 +78,15 @@ func RefreshSubscription(subscription *models.Subscription) error {
 
 	// 添加新的代理节点
 	utils.Info("开始添加新的代理节点 ID=%d, 数量=%d", subscription.ID, len(proxies))
+
 	for i, proxy := range proxies {
 		proxy.SubscriptionID = subscription.ID
+		proxy.IsCustom = false
+		proxy.ManualOverride = false
+		proxy.SourceKey = proxy.BuildSourceKey()
+		if _, exists := manualSourceKeys[proxy.SourceKey]; exists {
+			continue
+		}
 		if err := tx.Create(&proxy).Error; err != nil {
 			tx.Rollback()
 			utils.Error("添加代理节点失败 ID=%d, 节点索引=%d, 节点名称=%s, 错误: %v", subscription.ID, i, proxy.Name, err)

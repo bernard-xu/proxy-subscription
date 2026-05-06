@@ -27,7 +27,11 @@ func GetProxies(c *gin.Context) {
 
 	// 支持按订阅ID过滤
 	if subID := c.Query("subscription_id"); subID != "" {
-		query = query.Where("proxies.subscription_id = ?", subID)
+		if subID == "-1" || strings.EqualFold(subID, "custom") {
+			query = query.Where("proxies.is_custom = ?", true)
+		} else {
+			query = query.Where("proxies.subscription_id = ?", subID)
+		}
 	}
 
 	if err := query.Find(&results).Error; err != nil {
@@ -38,6 +42,9 @@ func GetProxies(c *gin.Context) {
 	// 为每个代理设置显示名称
 	for i := range results {
 		results[i].DisplayName = results[i].GetDisplayName()
+		if results[i].IsCustom {
+			results[i].SubscriptionName = "自定义节点"
+		}
 	}
 
 	c.JSON(http.StatusOK, results)
@@ -63,6 +70,152 @@ func GetProxy(c *gin.Context) {
 	c.JSON(http.StatusOK, proxy)
 }
 
+// AddCustomProxy 添加手动自定义代理节点
+func AddCustomProxy(c *gin.Context) {
+	var proxy models.Proxy
+	if err := c.ShouldBindJSON(&proxy); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的节点参数"})
+		return
+	}
+
+	if err := normalizeProxyFields(&proxy); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	proxy.SubscriptionID = 0
+	proxy.IsCustom = true
+	proxy.ManualOverride = true
+	proxy.SourceKey = proxy.BuildSourceKey()
+
+	if err := models.DB.Create(&proxy).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	services.InvalidateCache()
+	proxy.DisplayName = proxy.GetDisplayName()
+	c.JSON(http.StatusCreated, proxy)
+}
+
+// UpdateProxy 手动更新代理节点
+func UpdateProxy(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的ID"})
+		return
+	}
+
+	var existing models.Proxy
+	if err := models.DB.First(&existing, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "代理节点不存在"})
+		return
+	}
+
+	var proxy models.Proxy
+	if err := c.ShouldBindJSON(&proxy); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的节点参数"})
+		return
+	}
+	if err := normalizeProxyFields(&proxy); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	proxy.ID = existing.ID
+	proxy.CreatedAt = existing.CreatedAt
+	proxy.SubscriptionID = existing.SubscriptionID
+	proxy.IsCustom = existing.IsCustom
+	proxy.ManualOverride = true
+	if existing.SourceKey != "" {
+		proxy.SourceKey = existing.SourceKey
+	} else {
+		proxy.SourceKey = existing.BuildSourceKey()
+	}
+	if err := models.DB.Save(&proxy).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	services.InvalidateCache()
+	proxy.DisplayName = proxy.GetDisplayName()
+	c.JSON(http.StatusOK, proxy)
+}
+
+// DeleteCustomProxy 删除手动自定义代理节点
+func DeleteCustomProxy(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的ID"})
+		return
+	}
+
+	var proxy models.Proxy
+	if err := models.DB.First(&proxy, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "代理节点不存在"})
+		return
+	}
+	if !proxy.IsCustom {
+		c.JSON(http.StatusForbidden, gin.H{"error": "订阅节点不能手动删除"})
+		return
+	}
+
+	if err := models.DB.Delete(&proxy).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	services.InvalidateCache()
+	c.JSON(http.StatusOK, gin.H{"message": "节点已删除"})
+}
+
+func normalizeProxyFields(proxy *models.Proxy) error {
+	proxy.Name = strings.TrimSpace(proxy.Name)
+	proxy.Type = strings.ToLower(strings.TrimSpace(proxy.Type))
+	proxy.Server = strings.TrimSpace(proxy.Server)
+	proxy.UUID = strings.TrimSpace(proxy.UUID)
+	proxy.Password = strings.TrimSpace(proxy.Password)
+	proxy.Method = strings.TrimSpace(proxy.Method)
+	proxy.Network = strings.TrimSpace(proxy.Network)
+	proxy.Path = strings.TrimSpace(proxy.Path)
+	proxy.Host = strings.TrimSpace(proxy.Host)
+	proxy.SNI = strings.TrimSpace(proxy.SNI)
+	proxy.ALPN = strings.TrimSpace(proxy.ALPN)
+	proxy.Plugin = strings.TrimSpace(proxy.Plugin)
+	proxy.PluginOpts = strings.TrimSpace(proxy.PluginOpts)
+	proxy.RawConfig = strings.TrimSpace(proxy.RawConfig)
+
+	if proxy.Name == "" {
+		return errors.New("节点名称不能为空")
+	}
+	if proxy.Server == "" {
+		return errors.New("服务器不能为空")
+	}
+	if proxy.Port <= 0 || proxy.Port > 65535 {
+		return errors.New("端口必须在 1-65535 之间")
+	}
+
+	switch proxy.Type {
+	case "vmess":
+		if proxy.UUID == "" {
+			return errors.New("VMess 节点必须填写 UUID")
+		}
+		if proxy.Network == "" {
+			proxy.Network = "tcp"
+		}
+	case "ss":
+		if proxy.Method == "" || proxy.Password == "" {
+			return errors.New("Shadowsocks 节点必须填写加密方式和密码")
+		}
+	case "trojan":
+		if proxy.Password == "" {
+			return errors.New("Trojan 节点必须填写密码")
+		}
+	default:
+		return errors.New("仅支持 vmess、ss、trojan 类型")
+	}
+	return nil
+}
+
 // GetMergedSubscription 获取合并后的订阅
 func GetMergedSubscription(c *gin.Context) {
 	format := c.DefaultQuery("format", "base64")
@@ -85,8 +238,8 @@ func GetMergedSubscription(c *gin.Context) {
 
 	// 获取所有代理节点
 	var proxies []models.Proxy
-	if err := models.DB.Joins("JOIN subscriptions ON proxies.subscription_id = subscriptions.id").
-		Where("subscriptions.enabled = ?", true).
+	if err := models.DB.Joins("LEFT JOIN subscriptions ON proxies.subscription_id = subscriptions.id").
+		Where("proxies.is_custom = ? OR subscriptions.enabled = ?", true, true).
 		Find(&proxies).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

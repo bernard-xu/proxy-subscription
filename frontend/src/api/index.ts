@@ -116,6 +116,9 @@ export interface Subscription {
 export interface Proxy {
   id?: number;
   subscription_id: number;
+  is_custom?: boolean;
+  manual_override?: boolean;
+  source_key?: string;
   name: string;
   display_name?: string;
   type: string;
@@ -130,6 +133,9 @@ export interface Proxy {
   tls?: boolean;
   sni?: string;
   alpn?: string;
+  plugin?: string;
+  plugin_opts?: string;
+  allow_insecure?: boolean;
   rawConfig?: string;
   subscription_name?: string;
 }
@@ -151,6 +157,9 @@ export const proxyApi = {
     return api.get<Proxy[]>('/proxies', { params });
   },
   getById: (id: number) => api.get<Proxy>(`/proxies/${id}`),
+  create: (proxy: Proxy) => api.post<Proxy>('/proxies', proxy),
+  update: (id: number, proxy: Proxy) => api.put<Proxy>(`/proxies/${id}`, proxy),
+  delete: (id: number) => api.delete(`/proxies/${id}`),
 };
 
 // 获取合并订阅链接
