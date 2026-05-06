@@ -523,6 +523,12 @@ func parseV2raySubscription(content string) ([]models.Proxy, error) {
 				continue // 跳过解析失败的链接
 			}
 			proxies = append(proxies, proxy)
+		} else if strings.HasPrefix(line, "vless://") {
+			proxy, err := parseVlessLink(line)
+			if err != nil {
+				continue
+			}
+			proxies = append(proxies, proxy)
 		}
 	}
 
@@ -668,6 +674,12 @@ func autoDetectAndParse(content string) ([]models.Proxy, error) {
 				utils.Warn("解析vmess链接失败 行=%d, 错误: %v, 链接前50字符: %s", i+1, err, getPreview(line, 50))
 				errorCount++
 			}
+		case strings.HasPrefix(line, "vless://"):
+			proxy, err = parseVlessLink(line)
+			if err != nil {
+				utils.Warn("parse vless link failed line=%d, error=%v", i+1, err)
+				errorCount++
+			}
 		case strings.HasPrefix(line, "ss://"):
 			ssCount++
 			proxy, err = parseSSLink(line)
@@ -711,6 +723,7 @@ func autoDetectAndParse(content string) ([]models.Proxy, error) {
 					utils.Info("  该行可能是Base64编码，解码后前100字符: %s", getPreview(decodedStr, 100))
 					// 如果解码后看起来像代理链接，尝试解析
 					if strings.HasPrefix(decodedStr, "vmess://") ||
+						strings.HasPrefix(decodedStr, "vless://") ||
 						strings.HasPrefix(decodedStr, "ss://") ||
 						strings.HasPrefix(decodedStr, "trojan://") {
 						utils.Info("  检测到解码后是代理链接，尝试解析")
@@ -720,6 +733,8 @@ func autoDetectAndParse(content string) ([]models.Proxy, error) {
 						case strings.HasPrefix(decodedStr, "vmess://"):
 							vmessCount++
 							decodedProxy, decodedErr = parseVmessLink(decodedStr)
+						case strings.HasPrefix(decodedStr, "vless://"):
+							decodedProxy, decodedErr = parseVlessLink(decodedStr)
 						case strings.HasPrefix(decodedStr, "ss://"):
 							ssCount++
 							decodedProxy, decodedErr = parseSSLink(decodedStr)
@@ -807,6 +822,84 @@ func parseVmessLink(link string) (models.Proxy, error) {
 		TLS:       tls == "tls",
 		RawConfig: string(decoded),
 	}, nil
+}
+
+func parseVlessLink(link string) (models.Proxy, error) {
+	u, err := url.Parse(link)
+	if err != nil {
+		return models.Proxy{}, fmt.Errorf("URL解析错误: %v", err)
+	}
+	if u.Scheme != "vless" {
+		return models.Proxy{}, errors.New("VLESS链接格式错误：协议不是vless")
+	}
+	if u.User == nil || u.User.Username() == "" {
+		return models.Proxy{}, errors.New("VLESS链接格式错误：缺少UUID")
+	}
+	if u.Host == "" {
+		return models.Proxy{}, errors.New("VLESS链接格式错误：缺少主机地址")
+	}
+
+	host, portStr, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		host = u.Host
+		portStr = "443"
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return models.Proxy{}, fmt.Errorf("端口解析失败: %v", err)
+	}
+
+	query := u.Query()
+	nodeName := u.Fragment
+	if nodeName != "" {
+		if decodedName, err := url.QueryUnescape(nodeName); err == nil {
+			nodeName = decodedName
+		}
+	} else {
+		nodeName = host
+	}
+
+	network := query.Get("type")
+	if network == "" {
+		network = "tcp"
+	}
+	security := query.Get("security")
+
+	rawConfig := map[string]interface{}{}
+	for key, values := range query {
+		if len(values) > 0 {
+			rawConfig[key] = values[0]
+		}
+	}
+	rawData, _ := json.Marshal(rawConfig)
+
+	proxy := models.Proxy{
+		Type:      "vless",
+		Name:      nodeName,
+		Server:    host,
+		Port:      port,
+		UUID:      u.User.Username(),
+		Network:   network,
+		Path:      query.Get("path"),
+		Host:      query.Get("host"),
+		SNI:       query.Get("sni"),
+		ALPN:      query.Get("alpn"),
+		TLS:       security == "tls" || security == "reality",
+		RawConfig: string(rawData),
+	}
+	if proxy.SNI == "" {
+		proxy.SNI = query.Get("servername")
+	}
+	if proxy.Host == "" {
+		proxy.Host = query.Get("authority")
+	}
+	if allowInsecure := query.Get("allowInsecure"); allowInsecure == "1" || allowInsecure == "true" {
+		proxy.AllowInsecure = true
+	} else if skipVerify := query.Get("skip-cert-verify"); skipVerify == "1" || skipVerify == "true" {
+		proxy.AllowInsecure = true
+	}
+
+	return proxy, nil
 }
 
 // parseSSLink 解析Shadowsocks链接
@@ -1941,7 +2034,7 @@ func parseJSONSubscription(content string) ([]models.Proxy, error) {
 			// 只添加有效的代理
 			if proxy.Server != "" && proxy.Port != 0 &&
 				((proxy.Type == "ss" && proxy.Method != "" && proxy.Password != "") ||
-					(proxy.Type == "vmess" && proxy.UUID != "") ||
+					((proxy.Type == "vmess" || proxy.Type == "vless") && proxy.UUID != "") ||
 					(proxy.Type == "trojan" && proxy.Password != "") ||
 					(proxy.Type == "http") ||
 					(proxy.Type == "socks")) {
@@ -1990,6 +2083,8 @@ func parseProxyURI(uri string) (models.Proxy, error) {
 	switch {
 	case strings.HasPrefix(uri, "vmess://"):
 		return parseVmessLink(uri)
+	case strings.HasPrefix(uri, "vless://"):
+		return parseVlessLink(uri)
 	case strings.HasPrefix(uri, "ss://"):
 		return parseSSLink(uri)
 	case strings.HasPrefix(uri, "trojan://"):
@@ -2242,7 +2337,7 @@ func isValidProxy(proxy models.Proxy) bool {
 	switch proxy.Type {
 	case "ss":
 		return proxy.Method != "" && proxy.Password != ""
-	case "vmess":
+	case "vmess", "vless":
 		return proxy.UUID != ""
 	case "trojan":
 		return proxy.Password != ""

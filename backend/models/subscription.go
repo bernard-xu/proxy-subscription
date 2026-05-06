@@ -53,7 +53,15 @@ type Proxy struct {
 func (p *Proxy) BuildSourceKey() string {
 	rawConfig := strings.TrimSpace(p.RawConfig)
 	if rawConfig != "" {
-		return "raw:" + hashSourceKey(rawConfig)
+		rawParts := []string{
+			rawConfig,
+			strings.ToLower(strings.TrimSpace(p.Type)),
+			strings.ToLower(strings.TrimSpace(p.Server)),
+			strconv.Itoa(p.Port),
+			strings.TrimSpace(p.UUID),
+			strings.TrimSpace(p.Password),
+		}
+		return "raw:" + hashSourceKey(strings.Join(rawParts, "\x00"))
 	}
 
 	parts := []string{

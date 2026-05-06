@@ -25,8 +25,8 @@ xcopy .\frontend\dist .\backend\dist /E /H /Y /D /Q
 echo === Building the backend ===
 cd backend
 call go mod tidy
-call go build -ldflags="-s -w" -o ..\dist\proxy-subscription.exe .
+call go build -ldflags="-s -w" -o ..\dist\proxy-subscription .
 cd ..
 
 echo === Build Complete ===
-echo The binary files are located at: .\dist\proxy-subscription.exe
+echo The binary files are located at: .\dist\proxy-subscription

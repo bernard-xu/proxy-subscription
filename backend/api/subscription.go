@@ -39,7 +39,7 @@ func GetSubscriptions(c *gin.Context) {
 			Where("subscription_id = ? AND server != '' AND port > 0", sub.ID).
 			Where(
 				models.DB.Where("type = 'ss' AND method != '' AND password != ''").
-					Or("type = 'vmess' AND uuid != ''").
+					Or("(type = 'vmess' OR type = 'vless') AND uuid != ''").
 					Or("type = 'trojan' AND password != ''").
 					Or("type = 'http'").
 					Or("type = 'socks'"),
@@ -198,7 +198,7 @@ func RefreshSubscription(c *gin.Context) {
 		Where("subscription_id = ? AND server != '' AND port > 0", subscription.ID).
 		Where(
 			models.DB.Where("type = 'ss' AND method != '' AND password != ''").
-				Or("type = 'vmess' AND uuid != ''").
+				Or("(type = 'vmess' OR type = 'vless') AND uuid != ''").
 				Or("type = 'trojan' AND password != ''").
 				Or("type = 'http'").
 				Or("type = 'socks'"),

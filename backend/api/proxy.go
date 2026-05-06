@@ -225,7 +225,7 @@ func normalizeProxyFields(proxy *models.Proxy) error {
 	}
 
 	switch proxy.Type {
-	case "vmess":
+	case "vmess", "vless":
 		if proxy.UUID == "" {
 			return errors.New("VMess 节点必须填写 UUID")
 		}
@@ -306,6 +306,8 @@ func generateSubscriptionContent(proxies []models.Proxy, format string) (string,
 			case "vmess":
 				// 生成vmess链接
 				proxyURL = generateVmessURL(proxy)
+			case "vless":
+				proxyURL = generateVlessURL(proxy)
 			case "ss":
 				// 生成ss链接
 				proxyURL = generateSSURL(proxy)
@@ -381,6 +383,62 @@ func generateVmessURL(proxy models.Proxy) string {
 }
 
 // 生成Shadowsocks URL
+func generateVlessURL(proxy models.Proxy) string {
+	if proxy.UUID == "" {
+		return ""
+	}
+
+	result := "vless://" + url.QueryEscape(proxy.UUID) + "@" + proxy.Server + ":" + strconv.Itoa(proxy.Port)
+	params := url.Values{}
+	params.Set("encryption", "none")
+
+	rawConfig := map[string]interface{}{}
+	if proxy.RawConfig != "" {
+		_ = json.Unmarshal([]byte(proxy.RawConfig), &rawConfig)
+	}
+
+	if security, ok := rawConfig["security"].(string); ok && security != "" {
+		params.Set("security", security)
+	} else if proxy.TLS {
+		params.Set("security", "tls")
+	}
+	if proxy.Network != "" {
+		params.Set("type", proxy.Network)
+	}
+	if proxy.SNI != "" {
+		params.Set("sni", proxy.SNI)
+	}
+	if proxy.Host != "" {
+		params.Set("host", proxy.Host)
+	}
+	if proxy.Path != "" {
+		params.Set("path", proxy.Path)
+	}
+	if proxy.ALPN != "" {
+		params.Set("alpn", proxy.ALPN)
+	}
+	if proxy.AllowInsecure {
+		params.Set("allowInsecure", "1")
+	}
+
+	for key, value := range rawConfig {
+		if _, exists := params[key]; exists {
+			continue
+		}
+		if strValue, ok := value.(string); ok && strValue != "" {
+			params.Set(key, strValue)
+		}
+	}
+
+	if encoded := params.Encode(); encoded != "" {
+		result += "?" + encoded
+	}
+	if proxy.Name != "" {
+		result += "#" + url.QueryEscape(proxy.Name)
+	}
+	return result
+}
+
 func generateSSURL(proxy models.Proxy) string {
 	// 格式：ss://base64(method:password)@server:port?plugin=...#name
 	if proxy.Method == "" || proxy.Password == "" {
@@ -518,6 +576,25 @@ func generateClashConfig(proxies []models.Proxy) string {
 			}
 			if proxy.TLS {
 				yaml.WriteString("    tls: true\n")
+			}
+			if proxy.Path != "" {
+				yaml.WriteString("    ws-path: " + proxy.Path + "\n")
+			}
+			if proxy.Host != "" {
+				yaml.WriteString("    ws-headers:\n")
+				yaml.WriteString("      Host: " + proxy.Host + "\n")
+			}
+
+		case "vless":
+			yaml.WriteString("    uuid: " + proxy.UUID + "\n")
+			if proxy.Network != "" {
+				yaml.WriteString("    network: " + proxy.Network + "\n")
+			}
+			if proxy.TLS {
+				yaml.WriteString("    tls: true\n")
+			}
+			if proxy.SNI != "" {
+				yaml.WriteString("    servername: " + proxy.SNI + "\n")
 			}
 			if proxy.Path != "" {
 				yaml.WriteString("    ws-path: " + proxy.Path + "\n")

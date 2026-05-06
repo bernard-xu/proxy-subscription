@@ -7,6 +7,10 @@
           <el-icon><Plus /></el-icon>
           添加自定义节点
         </el-button>
+        <el-button @click="openImportDialog">
+          <el-icon><Upload /></el-icon>
+          一键导入
+        </el-button>
         <el-select
           v-model="selectedSubscription"
           placeholder="选择分组过滤"
@@ -114,6 +118,7 @@
         <el-form-item label="类型" prop="type">
           <el-select v-model="proxyForm.type">
             <el-option label="VMess" value="vmess" />
+            <el-option label="VLESS" value="vless" />
             <el-option label="Shadowsocks" value="ss" />
             <el-option label="Trojan" value="trojan" />
           </el-select>
@@ -125,7 +130,7 @@
           <el-input-number v-model="proxyForm.port" :min="1" :max="65535" controls-position="right" />
         </el-form-item>
 
-        <template v-if="proxyForm.type === 'vmess'">
+        <template v-if="proxyForm.type === 'vmess' || proxyForm.type === 'vless'">
           <el-form-item label="UUID" prop="uuid">
             <el-input v-model="proxyForm.uuid" />
           </el-form-item>
@@ -145,6 +150,14 @@
           <el-form-item label="主机名">
             <el-input v-model="proxyForm.host" />
           </el-form-item>
+          <template v-if="proxyForm.type === 'vless'">
+            <el-form-item label="SNI">
+              <el-input v-model="proxyForm.sni" />
+            </el-form-item>
+            <el-form-item label="ALPN">
+              <el-input v-model="proxyForm.alpn" />
+            </el-form-item>
+          </template>
         </template>
 
         <template v-if="proxyForm.type === 'ss'">
@@ -182,13 +195,26 @@
         <el-button type="primary" :loading="savingProxy" @click="saveCustomProxy">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="importDialogVisible" title="一键导入节点" width="680px">
+      <el-input
+        v-model="importLink"
+        type="textarea"
+        :rows="6"
+        placeholder="粘贴 vmess:// 或 vless:// 链接"
+      />
+      <template #footer>
+        <el-button @click="importDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingProxy" @click="importCustomProxy">导入</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus';
-import { Delete, Edit, Plus, Search, View } from '@element-plus/icons-vue';
+import { Delete, Edit, Plus, Search, Upload, View } from '@element-plus/icons-vue';
 import { useSubscriptionStore } from '@/stores/subscription';
 import { useProxyStore } from '@/stores/proxy';
 import { type Proxy } from '@/api';
@@ -202,6 +228,8 @@ const searchQuery = ref('');
 const detailDialogVisible = ref(false);
 const selectedProxy = ref<Proxy | null>(null);
 const formDialogVisible = ref(false);
+const importDialogVisible = ref(false);
+const importLink = ref('');
 const savingProxy = ref(false);
 const editingProxyId = ref<number | null>(null);
 const proxyFormRef = ref<FormInstance>();
@@ -225,6 +253,7 @@ const createEmptyProxy = (): Proxy => ({
   plugin: '',
   plugin_opts: '',
   allow_insecure: false,
+  rawConfig: '',
 });
 
 const proxyForm = ref<Proxy>(createEmptyProxy());
@@ -270,6 +299,8 @@ const getProxyTypeTag = (type: string) => {
   switch (type.toLowerCase()) {
     case 'vmess':
       return 'primary';
+    case 'vless':
+      return 'danger';
     case 'ss':
       return 'success';
     case 'trojan':
@@ -288,6 +319,11 @@ const openAddDialog = () => {
   editingProxyId.value = null;
   proxyForm.value = createEmptyProxy();
   formDialogVisible.value = true;
+};
+
+const openImportDialog = () => {
+  importLink.value = '';
+  importDialogVisible.value = true;
 };
 
 const openEditDialog = (proxy: Proxy) => {
@@ -310,6 +346,74 @@ const saveCustomProxy = async () => {
       ElMessage.success('自定义节点已添加');
     }
     formDialogVisible.value = false;
+  } finally {
+    savingProxy.value = false;
+  }
+};
+
+const decodeBase64 = (value: string) => {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
+  return decodeURIComponent(
+    Array.from(atob(normalized))
+      .map(char => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`)
+      .join(''),
+  );
+};
+
+const parseImportedProxy = (rawLink: string): Proxy => {
+  const link = rawLink.trim();
+  if (link.startsWith('vmess://')) {
+    const config = JSON.parse(decodeBase64(link.slice('vmess://'.length)));
+    return {
+      ...createEmptyProxy(),
+      type: 'vmess',
+      name: String(config.ps || config.name || config.add || 'VMess Node'),
+      server: String(config.add || ''),
+      port: Number(config.port || 0),
+      uuid: String(config.id || ''),
+      network: String(config.net || 'tcp'),
+      path: String(config.path || ''),
+      host: String(config.host || ''),
+      tls: config.tls === 'tls',
+      rawConfig: JSON.stringify(config),
+    };
+  }
+
+  if (link.startsWith('vless://')) {
+    const parsedUrl = new URL(link);
+    const params = parsedUrl.searchParams;
+    const security = params.get('security') || '';
+    const rawConfig = Object.fromEntries(params.entries());
+    return {
+      ...createEmptyProxy(),
+      type: 'vless',
+      name: decodeURIComponent(parsedUrl.hash.replace(/^#/, '')) || parsedUrl.hostname,
+      server: parsedUrl.hostname,
+      port: Number(parsedUrl.port || 443),
+      uuid: decodeURIComponent(parsedUrl.username),
+      network: params.get('type') || 'tcp',
+      path: params.get('path') || '',
+      host: params.get('host') || params.get('authority') || '',
+      tls: security === 'tls' || security === 'reality',
+      sni: params.get('sni') || params.get('servername') || '',
+      alpn: params.get('alpn') || '',
+      allow_insecure: ['1', 'true'].includes(params.get('allowInsecure') || params.get('skip-cert-verify') || ''),
+      rawConfig: JSON.stringify(rawConfig),
+    };
+  }
+
+  throw new Error('仅支持 vmess:// 和 vless:// 链接');
+};
+
+const importCustomProxy = async () => {
+  savingProxy.value = true;
+  try {
+    const importedProxy = parseImportedProxy(importLink.value);
+    await proxyStore.addProxy(importedProxy);
+    importDialogVisible.value = false;
+    ElMessage.success('节点已导入');
+  } catch (error: any) {
+    ElMessage.error(error.message || '导入失败');
   } finally {
     savingProxy.value = false;
   }
