@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // Subscription 订阅模型
@@ -589,7 +591,7 @@ func (p *Proxy) GetDisplayName() string {
 }
 
 // AfterFind GORM hook，在查询后自动设置 DisplayName
-func (p *Proxy) AfterFind() error {
+func (p *Proxy) AfterFind(_ *gorm.DB) error {
 	p.DisplayName = p.GetDisplayName()
 	return nil
 }

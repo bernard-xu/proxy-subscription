@@ -22,8 +22,8 @@ func GetProxies(c *gin.Context) {
 		SubscriptionName string `json:"subscription_name"`
 	}
 
-	var results []ProxyWithSubscription
-	query := models.DB.Model(&models.Proxy{}).Select("proxies.*, subscriptions.name as subscription_name").Joins("left join subscriptions on proxies.subscription_id = subscriptions.id")
+	var proxies []models.Proxy
+	query := models.DB.Model(&models.Proxy{})
 
 	// 支持按订阅ID过滤
 	if subID := c.Query("subscription_id"); subID != "" {
@@ -34,17 +34,47 @@ func GetProxies(c *gin.Context) {
 		}
 	}
 
-	if err := query.Find(&results).Error; err != nil {
+	if err := query.Find(&proxies).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 为每个代理设置显示名称
-	for i := range results {
-		results[i].DisplayName = results[i].GetDisplayName()
-		if results[i].IsCustom {
-			results[i].SubscriptionName = "自定义节点"
+	subscriptionIDs := make([]uint, 0)
+	seenSubscriptionIDs := make(map[uint]struct{})
+	for _, proxy := range proxies {
+		if proxy.IsCustom || proxy.SubscriptionID == 0 {
+			continue
 		}
+		if _, exists := seenSubscriptionIDs[proxy.SubscriptionID]; exists {
+			continue
+		}
+		seenSubscriptionIDs[proxy.SubscriptionID] = struct{}{}
+		subscriptionIDs = append(subscriptionIDs, proxy.SubscriptionID)
+	}
+
+	subscriptionNames := make(map[uint]string, len(subscriptionIDs))
+	if len(subscriptionIDs) > 0 {
+		var subscriptions []models.Subscription
+		if err := models.DB.Select("id", "name").Find(&subscriptions, subscriptionIDs).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		for _, subscription := range subscriptions {
+			subscriptionNames[subscription.ID] = subscription.Name
+		}
+	}
+
+	results := make([]ProxyWithSubscription, 0, len(proxies))
+	// 为每个代理设置显示名称
+	for _, proxy := range proxies {
+		proxy.DisplayName = proxy.GetDisplayName()
+		result := ProxyWithSubscription{Proxy: proxy}
+		if proxy.IsCustom {
+			result.SubscriptionName = "自定义节点"
+		} else {
+			result.SubscriptionName = subscriptionNames[proxy.SubscriptionID]
+		}
+		results = append(results, result)
 	}
 
 	c.JSON(http.StatusOK, results)
