@@ -121,6 +121,9 @@
             <el-option label="VLESS" value="vless" />
             <el-option label="Shadowsocks" value="ss" />
             <el-option label="Trojan" value="trojan" />
+            <el-option label="TUIC" value="tuic" />
+            <el-option label="AnyTLS" value="anytls" />
+            <el-option label="Hysteria2" value="hysteria2" />
           </el-select>
         </el-form-item>
         <el-form-item label="服务器" prop="server">
@@ -189,6 +192,24 @@
             <el-switch v-model="proxyForm.allow_insecure" />
           </el-form-item>
         </template>
+
+        <template v-if="proxyForm.type === 'tuic' || proxyForm.type === 'anytls' || proxyForm.type === 'hysteria2'">
+          <el-form-item v-if="proxyForm.type === 'tuic'" label="UUID" prop="uuid">
+            <el-input v-model="proxyForm.uuid" />
+          </el-form-item>
+          <el-form-item label="密码" prop="password">
+            <el-input v-model="proxyForm.password" />
+          </el-form-item>
+          <el-form-item label="SNI">
+            <el-input v-model="proxyForm.sni" />
+          </el-form-item>
+          <el-form-item label="ALPN">
+            <el-input v-model="proxyForm.alpn" placeholder="例如 h3" />
+          </el-form-item>
+          <el-form-item label="跳过证书验证">
+            <el-switch v-model="proxyForm.allow_insecure" />
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="formDialogVisible = false">取消</el-button>
@@ -201,7 +222,7 @@
         v-model="importLink"
         type="textarea"
         :rows="6"
-        placeholder="粘贴 vmess:// 或 vless:// 链接"
+        placeholder="粘贴 vmess://、vless://、tuic://、anytls:// 或 hysteria2:// 链接"
       />
       <template #footer>
         <el-button @click="importDialogVisible = false">取消</el-button>
@@ -305,6 +326,12 @@ const getProxyTypeTag = (type: string) => {
       return 'success';
     case 'trojan':
       return 'warning';
+    case 'tuic':
+      return 'info';
+    case 'anytls':
+      return 'primary';
+    case 'hysteria2':
+      return 'success';
     default:
       return 'info';
   }
@@ -402,7 +429,29 @@ const parseImportedProxy = (rawLink: string): Proxy => {
     };
   }
 
-  throw new Error('仅支持 vmess:// 和 vless:// 链接');
+  if (link.startsWith('tuic://') || link.startsWith('anytls://') || link.startsWith('hysteria2://') || link.startsWith('hy2://')) {
+    const parsedUrl = new URL(link);
+    const params = parsedUrl.searchParams;
+    const type = parsedUrl.protocol.replace(':', '') === 'hy2' ? 'hysteria2' : parsedUrl.protocol.replace(':', '');
+    const rawConfig = Object.fromEntries(params.entries());
+    const password = type === 'tuic' ? decodeURIComponent(parsedUrl.password) : decodeURIComponent(parsedUrl.username);
+    return {
+      ...createEmptyProxy(),
+      type,
+      name: decodeURIComponent(parsedUrl.hash.replace(/^#/, '')) || parsedUrl.hostname,
+      server: parsedUrl.hostname,
+      port: Number(parsedUrl.port || 443),
+      uuid: type === 'tuic' ? decodeURIComponent(parsedUrl.username) : '',
+      password,
+      tls: true,
+      sni: params.get('sni') || params.get('servername') || '',
+      alpn: params.get('alpn') || '',
+      allow_insecure: ['1', 'true'].includes(params.get('allowInsecure') || params.get('skip-cert-verify') || params.get('insecure') || ''),
+      rawConfig: JSON.stringify(rawConfig),
+    };
+  }
+
+  throw new Error('仅支持 vmess://、vless://、tuic://、anytls:// 和 hysteria2:// 链接');
 };
 
 const importCustomProxy = async () => {

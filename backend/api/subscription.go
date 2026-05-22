@@ -41,6 +41,8 @@ func GetSubscriptions(c *gin.Context) {
 				models.DB.Where("type = 'ss' AND method != '' AND password != ''").
 					Or("(type = 'vmess' OR type = 'vless') AND uuid != ''").
 					Or("type = 'trojan' AND password != ''").
+					Or("type = 'tuic' AND uuid != '' AND password != ''").
+					Or("(type = 'anytls' OR type = 'hysteria2') AND password != ''").
 					Or("type = 'http'").
 					Or("type = 'socks'"),
 			)
@@ -200,6 +202,8 @@ func RefreshSubscription(c *gin.Context) {
 			models.DB.Where("type = 'ss' AND method != '' AND password != ''").
 				Or("(type = 'vmess' OR type = 'vless') AND uuid != ''").
 				Or("type = 'trojan' AND password != ''").
+				Or("type = 'tuic' AND uuid != '' AND password != ''").
+				Or("(type = 'anytls' OR type = 'hysteria2') AND password != ''").
 				Or("type = 'http'").
 				Or("type = 'socks'"),
 		)

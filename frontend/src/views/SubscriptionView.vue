@@ -75,6 +75,9 @@
                         <el-option label="V2Ray" value="v2ray" />
                         <el-option label="Shadowsocks" value="ss" />
                         <el-option label="Trojan" value="trojan" />
+                        <el-option label="TUIC" value="tuic" />
+                        <el-option label="AnyTLS" value="anytls" />
+                        <el-option label="Hysteria2" value="hysteria2" />
                     </el-select>
                 </el-form-item>
                 <el-form-item label="状态" prop="enabled">

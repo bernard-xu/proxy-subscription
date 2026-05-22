@@ -304,6 +304,8 @@ func parseSubscriptionContent(content string, subType string) ([]models.Proxy, e
 		return parseSSSubscription(content)
 	case "trojan":
 		return parseTrojanSubscription(content)
+	case "tuic", "anytls", "hysteria2":
+		return parseSpecificURISubscription(content, subType)
 	case "mixed":
 		return parseMixedSubscription(content)
 	case "sip002":
@@ -583,6 +585,41 @@ func parseTrojanSubscription(content string) ([]models.Proxy, error) {
 	return proxies, nil
 }
 
+func parseSpecificURISubscription(content string, proxyType string) ([]models.Proxy, error) {
+	var proxies []models.Proxy
+	lines := strings.Split(content, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if proxyType == "tuic" && !strings.HasPrefix(line, "tuic://") {
+			continue
+		}
+		if proxyType == "anytls" && !strings.HasPrefix(line, "anytls://") {
+			continue
+		}
+		if proxyType == "hysteria2" && !strings.HasPrefix(line, "hysteria2://") && !strings.HasPrefix(line, "hy2://") {
+			continue
+		}
+		proxy, err := parseProxyURI(line)
+		if err != nil {
+			continue
+		}
+		proxies = append(proxies, proxy)
+	}
+
+	return proxies, nil
+}
+
+func hasExtendedProxyScheme(value string) bool {
+	return strings.HasPrefix(value, "tuic://") ||
+		strings.HasPrefix(value, "anytls://") ||
+		strings.HasPrefix(value, "hysteria2://") ||
+		strings.HasPrefix(value, "hy2://")
+}
+
 // autoDetectAndParse 自动检测并解析订阅类型
 func autoDetectAndParse(content string) ([]models.Proxy, error) {
 	utils.Info("开始自动检测订阅类型，内容长度=%d", len(content))
@@ -694,6 +731,24 @@ func autoDetectAndParse(content string) ([]models.Proxy, error) {
 				utils.Warn("解析trojan链接失败 行=%d, 错误: %v, 链接前50字符: %s", i+1, err, getPreview(line, 50))
 				errorCount++
 			}
+		case strings.HasPrefix(line, "tuic://"):
+			proxy, err = parseTuicLink(line)
+			if err != nil {
+				utils.Warn("解析tuic链接失败 行=%d, 错误: %v, 链接前50字符: %s", i+1, err, getPreview(line, 50))
+				errorCount++
+			}
+		case strings.HasPrefix(line, "anytls://"):
+			proxy, err = parseAnyTLSLink(line)
+			if err != nil {
+				utils.Warn("解析anytls链接失败 行=%d, 错误: %v, 链接前50字符: %s", i+1, err, getPreview(line, 50))
+				errorCount++
+			}
+		case strings.HasPrefix(line, "hysteria2://") || strings.HasPrefix(line, "hy2://"):
+			proxy, err = parseHysteria2Link(line)
+			if err != nil {
+				utils.Warn("解析hysteria2链接失败 行=%d, 错误: %v, 链接前50字符: %s", i+1, err, getPreview(line, 50))
+				errorCount++
+			}
 		case strings.HasPrefix(line, "ssr://"):
 			proxy, err = parseSSRLink(line)
 			if err != nil {
@@ -725,7 +780,8 @@ func autoDetectAndParse(content string) ([]models.Proxy, error) {
 					if strings.HasPrefix(decodedStr, "vmess://") ||
 						strings.HasPrefix(decodedStr, "vless://") ||
 						strings.HasPrefix(decodedStr, "ss://") ||
-						strings.HasPrefix(decodedStr, "trojan://") {
+						strings.HasPrefix(decodedStr, "trojan://") ||
+						hasExtendedProxyScheme(decodedStr) {
 						utils.Info("  检测到解码后是代理链接，尝试解析")
 						var decodedProxy models.Proxy
 						var decodedErr error
@@ -741,6 +797,12 @@ func autoDetectAndParse(content string) ([]models.Proxy, error) {
 						case strings.HasPrefix(decodedStr, "trojan://"):
 							trojanCount++
 							decodedProxy, decodedErr = parseTrojanLink(decodedStr)
+						case strings.HasPrefix(decodedStr, "tuic://"):
+							decodedProxy, decodedErr = parseTuicLink(decodedStr)
+						case strings.HasPrefix(decodedStr, "anytls://"):
+							decodedProxy, decodedErr = parseAnyTLSLink(decodedStr)
+						case strings.HasPrefix(decodedStr, "hysteria2://") || strings.HasPrefix(decodedStr, "hy2://"):
+							decodedProxy, decodedErr = parseHysteria2Link(decodedStr)
 						}
 						if decodedErr == nil {
 							proxies = append(proxies, decodedProxy)
@@ -1179,6 +1241,180 @@ func parseTrojanLink(link string) (models.Proxy, error) {
 	return proxy, nil
 }
 
+func parseTuicLink(link string) (models.Proxy, error) {
+	proxy, query, err := parseCredentialProxyURL(link, "tuic", true)
+	if err != nil {
+		return models.Proxy{}, err
+	}
+	if proxy.UUID == "" {
+		return models.Proxy{}, errors.New("TUIC链接格式错误：缺少UUID")
+	}
+	if proxy.Password == "" {
+		return models.Proxy{}, errors.New("TUIC链接格式错误：缺少密码")
+	}
+	proxy.TLS = true
+	proxy.SNI = firstQueryValue(query, "sni", "servername")
+	proxy.ALPN = query.Get("alpn")
+	if proxy.ALPN == "" {
+		proxy.ALPN = query.Get("alpnList")
+	}
+	proxy.AllowInsecure = truthyQuery(query, "allowInsecure", "skip-cert-verify", "insecure")
+	proxy.RawConfig = marshalQueryRawConfig(query, map[string]interface{}{
+		"uuid":           proxy.UUID,
+		"password":       proxy.Password,
+		"sni":            proxy.SNI,
+		"alpn":           proxy.ALPN,
+		"allowInsecure":  proxy.AllowInsecure,
+		"congestion":     query.Get("congestion_control"),
+		"udpRelayMode":   query.Get("udp_relay_mode"),
+		"disableSNI":     query.Get("disable_sni"),
+		"reduceRtt":      query.Get("reduce_rtt"),
+		"heartbeat":      query.Get("heartbeat_interval"),
+		"requestTimeout": query.Get("request_timeout"),
+	})
+	return proxy, nil
+}
+
+func parseAnyTLSLink(link string) (models.Proxy, error) {
+	proxy, query, err := parseCredentialProxyURL(link, "anytls", false)
+	if err != nil {
+		return models.Proxy{}, err
+	}
+	if proxy.Password == "" {
+		return models.Proxy{}, errors.New("AnyTLS链接格式错误：缺少密码")
+	}
+	proxy.TLS = true
+	proxy.SNI = firstQueryValue(query, "sni", "servername")
+	proxy.ALPN = query.Get("alpn")
+	proxy.AllowInsecure = truthyQuery(query, "allowInsecure", "skip-cert-verify", "insecure")
+	proxy.RawConfig = marshalQueryRawConfig(query, map[string]interface{}{
+		"password":      proxy.Password,
+		"sni":           proxy.SNI,
+		"alpn":          proxy.ALPN,
+		"allowInsecure": proxy.AllowInsecure,
+	})
+	return proxy, nil
+}
+
+func parseHysteria2Link(link string) (models.Proxy, error) {
+	proxy, query, err := parseCredentialProxyURL(link, "hysteria2", false)
+	if err != nil {
+		return models.Proxy{}, err
+	}
+	if proxy.Password == "" {
+		return models.Proxy{}, errors.New("Hysteria2链接格式错误：缺少密码")
+	}
+	proxy.TLS = true
+	proxy.SNI = firstQueryValue(query, "sni", "servername")
+	proxy.ALPN = query.Get("alpn")
+	proxy.AllowInsecure = truthyQuery(query, "allowInsecure", "skip-cert-verify", "insecure")
+	proxy.RawConfig = marshalQueryRawConfig(query, map[string]interface{}{
+		"password":      proxy.Password,
+		"sni":           proxy.SNI,
+		"alpn":          proxy.ALPN,
+		"allowInsecure": proxy.AllowInsecure,
+		"obfs":          query.Get("obfs"),
+		"obfs-password": query.Get("obfs-password"),
+	})
+	return proxy, nil
+}
+
+func parseCredentialProxyURL(link string, proxyType string, hasUUID bool) (models.Proxy, url.Values, error) {
+	u, err := url.Parse(link)
+	if err != nil {
+		return models.Proxy{}, nil, fmt.Errorf("URL解析错误: %v", err)
+	}
+	if proxyType == "hysteria2" {
+		if u.Scheme != "hysteria2" && u.Scheme != "hy2" {
+			return models.Proxy{}, nil, errors.New("Hysteria2链接格式错误：协议不是hysteria2或hy2")
+		}
+	} else if u.Scheme != proxyType {
+		return models.Proxy{}, nil, fmt.Errorf("%s链接格式错误：协议不是%s", proxyType, proxyType)
+	}
+	if u.User == nil || u.User.Username() == "" {
+		return models.Proxy{}, nil, fmt.Errorf("%s链接格式错误：缺少认证信息", proxyType)
+	}
+	if u.Host == "" {
+		return models.Proxy{}, nil, fmt.Errorf("%s链接格式错误：缺少主机地址", proxyType)
+	}
+
+	host, portStr, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		host = u.Host
+		portStr = "443"
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return models.Proxy{}, nil, fmt.Errorf("端口解析失败: %v", err)
+	}
+
+	name := u.Fragment
+	if name != "" {
+		if decodedName, err := url.QueryUnescape(name); err == nil {
+			name = decodedName
+		}
+	} else {
+		name = host
+	}
+
+	proxy := models.Proxy{
+		Type:   proxyType,
+		Name:   name,
+		Server: host,
+		Port:   port,
+	}
+	if hasUUID {
+		proxy.UUID = u.User.Username()
+		if password, ok := u.User.Password(); ok {
+			proxy.Password = password
+		}
+	} else {
+		proxy.Password = u.User.Username()
+	}
+
+	return proxy, u.Query(), nil
+}
+
+func firstQueryValue(query url.Values, keys ...string) string {
+	for _, key := range keys {
+		if value := query.Get(key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func truthyQuery(query url.Values, keys ...string) bool {
+	for _, key := range keys {
+		value := strings.ToLower(query.Get(key))
+		if value == "1" || value == "true" || value == "yes" {
+			return true
+		}
+	}
+	return false
+}
+
+func marshalQueryRawConfig(query url.Values, defaults map[string]interface{}) string {
+	rawConfig := map[string]interface{}{}
+	for key, value := range defaults {
+		if strValue, ok := value.(string); ok && strValue == "" {
+			continue
+		}
+		rawConfig[key] = value
+	}
+	for key, values := range query {
+		if len(values) == 0 {
+			continue
+		}
+		if _, exists := rawConfig[key]; exists {
+			continue
+		}
+		rawConfig[key] = values[0]
+	}
+	jsonData, _ := json.Marshal(rawConfig)
+	return string(jsonData)
+}
+
 // isIP 判断字符串是否为IP地址
 func isIP(host string) bool {
 	// 简单判断是否为IPv4地址
@@ -1568,6 +1804,8 @@ func parseSurgeSubscription(content string) ([]models.Proxy, error) {
 		if (proxy.Type == "ss" && proxy.Method != "" && proxy.Password != "") ||
 			(proxy.Type == "vmess" && proxy.UUID != "") ||
 			(proxy.Type == "trojan" && proxy.Password != "") ||
+			(proxy.Type == "tuic" && proxy.UUID != "" && proxy.Password != "") ||
+			((proxy.Type == "anytls" || proxy.Type == "hysteria2") && proxy.Password != "") ||
 			(proxy.Type == "http") ||
 			(proxy.Type == "socks") {
 			proxies = append(proxies, proxy)
@@ -1592,8 +1830,10 @@ func parseQuantumultSubscription(content string) ([]models.Proxy, error) {
 
 		// 检查是否为URI格式
 		if strings.HasPrefix(line, "vmess://") ||
+			strings.HasPrefix(line, "vless://") ||
 			strings.HasPrefix(line, "ss://") ||
-			strings.HasPrefix(line, "trojan://") {
+			strings.HasPrefix(line, "trojan://") ||
+			hasExtendedProxyScheme(line) {
 			// 使用已有的解析函数
 			proxy, err := parseProxyURI(line)
 			if err == nil {
@@ -1790,6 +2030,8 @@ func parseQuantumultSubscription(content string) ([]models.Proxy, error) {
 		if (proxy.Type == "ss" && proxy.Method != "" && proxy.Password != "") ||
 			(proxy.Type == "vmess" && proxy.UUID != "") ||
 			(proxy.Type == "trojan" && proxy.Password != "") ||
+			(proxy.Type == "tuic" && proxy.UUID != "" && proxy.Password != "") ||
+			((proxy.Type == "anytls" || proxy.Type == "hysteria2") && proxy.Password != "") ||
 			(proxy.Type == "http") ||
 			(proxy.Type == "socks") {
 			proxies = append(proxies, proxy)
@@ -1930,6 +2172,48 @@ func parseJSONSubscription(content string) ([]models.Proxy, error) {
 				} else if allowInsecure, ok := item["allowInsecure"].(bool); ok {
 					proxy.AllowInsecure = allowInsecure
 				}
+			case "tuic":
+				if uuid, ok := item["uuid"].(string); ok {
+					proxy.UUID = uuid
+				}
+				if password, ok := item["password"].(string); ok {
+					proxy.Password = password
+				}
+				if sni, ok := item["sni"].(string); ok {
+					proxy.SNI = sni
+				} else if servername, ok := item["servername"].(string); ok {
+					proxy.SNI = servername
+				}
+				if alpn, ok := item["alpn"].(string); ok {
+					proxy.ALPN = alpn
+				}
+				if skipVerify, ok := item["skip-cert-verify"].(bool); ok {
+					proxy.AllowInsecure = skipVerify
+				} else if allowInsecure, ok := item["allowInsecure"].(bool); ok {
+					proxy.AllowInsecure = allowInsecure
+				}
+				proxy.TLS = true
+			case "anytls", "hysteria2", "hy2":
+				if proxy.Type == "hy2" {
+					proxy.Type = "hysteria2"
+				}
+				if password, ok := item["password"].(string); ok {
+					proxy.Password = password
+				}
+				if sni, ok := item["sni"].(string); ok {
+					proxy.SNI = sni
+				} else if servername, ok := item["servername"].(string); ok {
+					proxy.SNI = servername
+				}
+				if alpn, ok := item["alpn"].(string); ok {
+					proxy.ALPN = alpn
+				}
+				if skipVerify, ok := item["skip-cert-verify"].(bool); ok {
+					proxy.AllowInsecure = skipVerify
+				} else if allowInsecure, ok := item["allowInsecure"].(bool); ok {
+					proxy.AllowInsecure = allowInsecure
+				}
+				proxy.TLS = true
 			case "http", "https":
 				proxy.Type = "http"
 
@@ -2036,6 +2320,8 @@ func parseJSONSubscription(content string) ([]models.Proxy, error) {
 				((proxy.Type == "ss" && proxy.Method != "" && proxy.Password != "") ||
 					((proxy.Type == "vmess" || proxy.Type == "vless") && proxy.UUID != "") ||
 					(proxy.Type == "trojan" && proxy.Password != "") ||
+					(proxy.Type == "tuic" && proxy.UUID != "" && proxy.Password != "") ||
+					((proxy.Type == "anytls" || proxy.Type == "hysteria2") && proxy.Password != "") ||
 					(proxy.Type == "http") ||
 					(proxy.Type == "socks")) {
 
@@ -2089,6 +2375,12 @@ func parseProxyURI(uri string) (models.Proxy, error) {
 		return parseSSLink(uri)
 	case strings.HasPrefix(uri, "trojan://"):
 		return parseTrojanLink(uri)
+	case strings.HasPrefix(uri, "tuic://"):
+		return parseTuicLink(uri)
+	case strings.HasPrefix(uri, "anytls://"):
+		return parseAnyTLSLink(uri)
+	case strings.HasPrefix(uri, "hysteria2://") || strings.HasPrefix(uri, "hy2://"):
+		return parseHysteria2Link(uri)
 	case strings.HasPrefix(uri, "ssr://"):
 		return parseSSRLink(uri)
 	case strings.HasPrefix(uri, "http://") || strings.HasPrefix(uri, "https://"):
@@ -2219,6 +2511,48 @@ func parseJSONProxy(item map[string]interface{}) models.Proxy {
 		} else if allowInsecure, ok := item["allowInsecure"].(bool); ok {
 			proxy.AllowInsecure = allowInsecure
 		}
+	case "tuic":
+		if uuid, ok := item["uuid"].(string); ok {
+			proxy.UUID = uuid
+		}
+		if password, ok := item["password"].(string); ok {
+			proxy.Password = password
+		}
+		if sni, ok := item["sni"].(string); ok {
+			proxy.SNI = sni
+		} else if servername, ok := item["servername"].(string); ok {
+			proxy.SNI = servername
+		}
+		if alpn, ok := item["alpn"].(string); ok {
+			proxy.ALPN = alpn
+		}
+		if skipVerify, ok := item["skip-cert-verify"].(bool); ok {
+			proxy.AllowInsecure = skipVerify
+		} else if allowInsecure, ok := item["allowInsecure"].(bool); ok {
+			proxy.AllowInsecure = allowInsecure
+		}
+		proxy.TLS = true
+	case "anytls", "hysteria2", "hy2":
+		if proxy.Type == "hy2" {
+			proxy.Type = "hysteria2"
+		}
+		if password, ok := item["password"].(string); ok {
+			proxy.Password = password
+		}
+		if sni, ok := item["sni"].(string); ok {
+			proxy.SNI = sni
+		} else if servername, ok := item["servername"].(string); ok {
+			proxy.SNI = servername
+		}
+		if alpn, ok := item["alpn"].(string); ok {
+			proxy.ALPN = alpn
+		}
+		if skipVerify, ok := item["skip-cert-verify"].(bool); ok {
+			proxy.AllowInsecure = skipVerify
+		} else if allowInsecure, ok := item["allowInsecure"].(bool); ok {
+			proxy.AllowInsecure = allowInsecure
+		}
+		proxy.TLS = true
 	case "http", "https":
 		proxy.Type = "http"
 
@@ -2340,6 +2674,10 @@ func isValidProxy(proxy models.Proxy) bool {
 	case "vmess", "vless":
 		return proxy.UUID != ""
 	case "trojan":
+		return proxy.Password != ""
+	case "tuic":
+		return proxy.UUID != "" && proxy.Password != ""
+	case "anytls", "hysteria2":
 		return proxy.Password != ""
 	case "http":
 		return true

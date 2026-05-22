@@ -240,8 +240,18 @@ func normalizeProxyFields(proxy *models.Proxy) error {
 		if proxy.Password == "" {
 			return errors.New("Trojan 节点必须填写密码")
 		}
+	case "tuic":
+		if proxy.UUID == "" || proxy.Password == "" {
+			return errors.New("TUIC 节点必须填写 UUID 和密码")
+		}
+		proxy.TLS = true
+	case "anytls", "hysteria2":
+		if proxy.Password == "" {
+			return errors.New("AnyTLS/Hysteria2 节点必须填写密码")
+		}
+		proxy.TLS = true
 	default:
-		return errors.New("仅支持 vmess、ss、trojan 类型")
+		return errors.New("仅支持 vmess、vless、ss、trojan、tuic、anytls、hysteria2 类型")
 	}
 	return nil
 }
@@ -314,6 +324,8 @@ func generateSubscriptionContent(proxies []models.Proxy, format string) (string,
 			case "trojan":
 				// 生成trojan链接
 				proxyURL = generateTrojanURL(proxy)
+			case "tuic", "anytls", "hysteria2":
+				proxyURL = generateCredentialProxyURL(proxy)
 			default:
 				continue
 			}
@@ -535,6 +547,54 @@ func generateTrojanURL(proxy models.Proxy) string {
 	return result
 }
 
+func generateCredentialProxyURL(proxy models.Proxy) string {
+	if proxy.Type == "tuic" && (proxy.UUID == "" || proxy.Password == "") {
+		return ""
+	}
+	if (proxy.Type == "anytls" || proxy.Type == "hysteria2") && proxy.Password == "" {
+		return ""
+	}
+
+	user := url.QueryEscape(proxy.Password)
+	if proxy.Type == "tuic" {
+		user = url.QueryEscape(proxy.UUID) + ":" + url.QueryEscape(proxy.Password)
+	}
+	result := proxy.Type + "://" + user + "@" + proxy.Server + ":" + strconv.Itoa(proxy.Port)
+	params := url.Values{}
+	if proxy.SNI != "" {
+		params.Set("sni", proxy.SNI)
+	}
+	if proxy.ALPN != "" {
+		params.Set("alpn", proxy.ALPN)
+	}
+	if proxy.AllowInsecure {
+		params.Set("allowInsecure", "1")
+	}
+
+	if proxy.RawConfig != "" {
+		var rawConfig map[string]interface{}
+		if err := json.Unmarshal([]byte(proxy.RawConfig), &rawConfig); err == nil {
+			for key, value := range rawConfig {
+				if key == "uuid" || key == "password" || key == "server" || key == "port" ||
+					key == "sni" || key == "servername" || key == "alpn" || key == "allowInsecure" {
+					continue
+				}
+				if strValue, ok := value.(string); ok && strValue != "" {
+					params.Set(key, strValue)
+				}
+			}
+		}
+	}
+
+	if encoded := params.Encode(); encoded != "" {
+		result += "?" + encoded
+	}
+	if proxy.Name != "" {
+		result += "#" + url.QueryEscape(proxy.Name)
+	}
+	return result
+}
+
 // 生成Clash配置
 func generateClashConfig(proxies []models.Proxy) string {
 	// 实现Clash配置生成逻辑
@@ -613,6 +673,37 @@ func generateClashConfig(proxies []models.Proxy) string {
 				yaml.WriteString("    alpn:\n")
 				for _, alpn := range strings.Split(proxy.ALPN, ",") {
 					yaml.WriteString("      - " + alpn + "\n")
+				}
+			}
+			if proxy.AllowInsecure {
+				yaml.WriteString("    skip-cert-verify: true\n")
+			}
+		case "tuic":
+			yaml.WriteString("    uuid: ")
+			yaml.WriteString(proxy.UUID)
+			yaml.WriteString("\n")
+			yaml.WriteString("    password: " + proxy.Password + "\n")
+			if proxy.SNI != "" {
+				yaml.WriteString("    sni: " + proxy.SNI + "\n")
+			}
+			if proxy.ALPN != "" {
+				yaml.WriteString("    alpn:\n")
+				for _, alpn := range strings.Split(proxy.ALPN, ",") {
+					yaml.WriteString("      - " + strings.TrimSpace(alpn) + "\n")
+				}
+			}
+			if proxy.AllowInsecure {
+				yaml.WriteString("    skip-cert-verify: true\n")
+			}
+		case "anytls", "hysteria2":
+			yaml.WriteString("    password: " + proxy.Password + "\n")
+			if proxy.SNI != "" {
+				yaml.WriteString("    sni: " + proxy.SNI + "\n")
+			}
+			if proxy.ALPN != "" {
+				yaml.WriteString("    alpn:\n")
+				for _, alpn := range strings.Split(proxy.ALPN, ",") {
+					yaml.WriteString("      - " + strings.TrimSpace(alpn) + "\n")
 				}
 			}
 			if proxy.AllowInsecure {

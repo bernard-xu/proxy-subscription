@@ -1,8 +1,10 @@
 #!/bin/bash
 
-EXPORT CGO_ENABLED=0
-EXPORT GOOS=linux
-EXPORT GOARCH=amd64
+set -euo pipefail
+
+export CGO_ENABLED=0
+export GOOS=linux
+export GOARCH=amd64
 
 rm -rf ./dist
 mkdir -p ./dist
@@ -16,7 +18,7 @@ cd frontend
 npm install
 npm run build
 cd ..
-copy ./frontend/dist ./backend/dist
+cp -R ./frontend/dist/. ./backend/dist/
 
 echo "===build backend ==="
 cd backend
